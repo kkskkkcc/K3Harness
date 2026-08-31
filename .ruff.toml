@@ -1,0 +1,10 @@
+line-length = 100
+target-version = "py311"
+extend-exclude = ["references", ".venv"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = [
+  "B008",  # FastAPI intentionally declares Depends() in parameter defaults.
+  "UP042", # str + Enum keeps the schemas explicit and JSON-compatible.
+]

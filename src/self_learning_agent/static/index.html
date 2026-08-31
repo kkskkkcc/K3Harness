@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="A local memory workbench for chatting with and inspecting a self-learning AI agent."
+    />
+    <title>Recall — Local AI Memory Workbench</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="sidebar-scrim" id="sidebar-scrim" aria-hidden="true"></div>
+
+      <aside class="sidebar" id="memory-sidebar" aria-label="Agent memory panel">
+        <div class="brand-row">
+          <a class="brand" href="/" aria-label="Recall home">
+            <span class="brand-mark" aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </span>
+            <span>
+              <strong>RECALL</strong>
+              <small>memory workbench</small>
+            </span>
+          </a>
+          <button class="icon-button close-sidebar" id="close-sidebar" aria-label="Close memories">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <button class="new-conversation-button" id="new-conversation" type="button">
+          <span class="plus" aria-hidden="true">+</span>
+          New conversation
+          <span class="shortcut" aria-hidden="true">Ctrl N</span>
+        </button>
+
+        <section class="identity-panel" aria-labelledby="identity-label">
+          <label id="identity-label" for="user-id">Memory identity</label>
+          <div class="identity-input-row">
+            <span class="avatar" aria-hidden="true">U</span>
+            <input id="user-id" name="user-id" value="demo-user" maxlength="128" />
+          </div>
+          <p>Conversations with the same identity share long-term memory.</p>
+        </section>
+
+        <section class="memory-section" aria-labelledby="memory-heading">
+          <div class="section-heading-row">
+            <div>
+              <span class="eyebrow">LONG-TERM STORE</span>
+              <h2 id="memory-heading">Memories <span id="memory-count">0</span></h2>
+            </div>
+            <button class="icon-button" id="refresh-memories" aria-label="Refresh memories">
+              <span class="refresh-icon" aria-hidden="true">↻</span>
+            </button>
+          </div>
+
+          <div class="memory-list" id="memory-list" aria-live="polite">
+            <div class="memory-empty">
+              <span class="memory-empty-icon" aria-hidden="true">◇</span>
+              <strong>No memories yet</strong>
+              <p>Finalize a conversation to create durable memories.</p>
+            </div>
+          </div>
+        </section>
+
+        <footer class="sidebar-footer">
+          <div class="local-stack">
+            <span class="stack-light" aria-hidden="true"></span>
+            <span>
+              <strong>Local stack</strong>
+              <small>Ollama · Mem0 · Qdrant</small>
+            </span>
+          </div>
+          <a href="/docs" target="_blank" rel="noreferrer">API docs ↗</a>
+        </footer>
+      </aside>
+
+      <main class="chat-workspace">
+        <header class="chat-header">
+          <div class="chat-header-main">
+            <button
+              class="icon-button mobile-memory-toggle"
+              id="open-sidebar"
+              aria-label="Open memories"
+            >
+              <span aria-hidden="true">◫</span>
+            </button>
+            <div>
+              <span class="eyebrow">ACTIVE SESSION</span>
+              <h1 id="conversation-title">New conversation</h1>
+            </div>
+          </div>
+
+          <div class="header-actions">
+            <div class="connection-status" id="connection-status" role="status">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="connection-label">Checking local services</span>
+            </div>
+            <button class="finalize-button" id="finalize-conversation" type="button" disabled>
+              Finalize &amp; learn
+            </button>
+          </div>
+        </header>
+
+        <section class="message-scroller" id="message-scroller" aria-label="Conversation">
+          <div class="empty-state" id="empty-state">
+            <div class="empty-orbit" aria-hidden="true">
+              <span class="orbit orbit-one"></span>
+              <span class="orbit orbit-two"></span>
+              <span class="orbit-core">R</span>
+            </div>
+            <span class="eyebrow">LOCAL MEMORY AGENT</span>
+            <h2>Ask something worth remembering.</h2>
+            <p>
+              Your message stays on this machine. Relevant memories are recalled before every
+              answer, and new memories are written only when you finalize the conversation.
+            </p>
+            <div class="prompt-suggestions" aria-label="Example messages">
+              <button type="button" data-prompt="Remember that I prefer concise explanations with practical examples.">
+                <span>01</span> Save a preference
+              </button>
+              <button type="button" data-prompt="I am building this AI agent as a portfolio project. Help me plan the next milestone.">
+                <span>02</span> Plan a milestone
+              </button>
+              <button type="button" data-prompt="What do you remember about my goals and preferences?">
+                <span>03</span> Test memory recall
+              </button>
+            </div>
+          </div>
+          <div class="message-list" id="message-list" aria-live="polite"></div>
+        </section>
+
+        <div class="composer-zone">
+          <form class="composer" id="chat-form">
+            <label class="sr-only" for="message-input">Message the agent</label>
+            <textarea
+              id="message-input"
+              rows="1"
+              maxlength="20000"
+              placeholder="Message your local agent…"
+              autocomplete="off"
+            ></textarea>
+            <button class="send-button" id="send-message" type="submit" aria-label="Send message">
+              <span aria-hidden="true">↑</span>
+            </button>
+          </form>
+          <div class="composer-meta">
+            <span><kbd>Enter</kbd> send · <kbd>Shift Enter</kbd> new line</span>
+            <span id="session-label">No conversation started</span>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast-region" id="toast-region" aria-live="assertive"></div>
+  </body>
+</html>

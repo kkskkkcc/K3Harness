@@ -1,0 +1,47 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: agent_memory
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - agent_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_memory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - agent_qdrant_data:/qdrant/storage
+
+  api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agent:agent@db:5432/agent_memory
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      MEM0_QDRANT_HOST: qdrant
+      MEM0_HISTORY_DB_PATH: /app/data/mem0_history.db
+    volumes:
+      - agent_mem0_data:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+
+volumes:
+  agent_postgres_data:
+  agent_qdrant_data:
+  agent_mem0_data:
