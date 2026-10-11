@@ -57,7 +57,7 @@ def test_mem0_config_uses_only_local_providers() -> None:
     config = build_mem0_config(Settings(_env_file=None), Path(".data/history.db"))
 
     assert config["llm"]["provider"] == "ollama"
-    assert config["llm"]["config"]["model"] == "qwen3:1.7b"
+    assert config["llm"]["config"]["model"] == "qwen3-local:8b"
     assert config["llm"]["config"]["max_tokens"] == 350
     assert config["embedder"]["provider"] == "ollama"
     assert config["vector_store"]["provider"] == "qdrant"

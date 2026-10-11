@@ -1,160 +1,160 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta
-      name="description"
-      content="A local memory workbench for chatting with and inspecting a self-learning AI agent."
-    />
-    <title>Recall — Local AI Memory Workbench</title>
+    <meta name="description" content="面向 K3COM260 的本地 Agent 工作台" />
+    <title>K3 Agent · 本地工作台</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="/static/app.js" defer></script>
   </head>
   <body>
     <div class="app-shell">
-      <div class="sidebar-scrim" id="sidebar-scrim" aria-hidden="true"></div>
-
-      <aside class="sidebar" id="memory-sidebar" aria-label="Agent memory panel">
+      <aside class="sidebar" id="memory-sidebar" aria-label="项目导航">
         <div class="brand-row">
-          <a class="brand" href="/" aria-label="Recall home">
-            <span class="brand-mark" aria-hidden="true">
-              <span></span><span></span><span></span><span></span>
-            </span>
-            <span>
-              <strong>RECALL</strong>
-              <small>memory workbench</small>
-            </span>
+          <a class="brand" href="/" aria-label="K3 Agent 首页">
+            <span class="brand-glyph" aria-hidden="true">⌬</span>
+            <span><strong>K3 Agent</strong><small>本地智能工作台</small></span>
           </a>
-          <button class="icon-button close-sidebar" id="close-sidebar" aria-label="Close memories">
-            <span aria-hidden="true">×</span>
-          </button>
+          <button class="icon-button close-sidebar" id="close-sidebar" type="button" aria-label="关闭导航">×</button>
         </div>
 
         <button class="new-conversation-button" id="new-conversation" type="button">
-          <span class="plus" aria-hidden="true">+</span>
-          New conversation
-          <span class="shortcut" aria-hidden="true">Ctrl N</span>
+          <span class="new-icon" aria-hidden="true">＋</span><span>新建任务</span><kbd>Ctrl N</kbd>
         </button>
 
-        <section class="identity-panel" aria-labelledby="identity-label">
-          <label id="identity-label" for="user-id">Memory identity</label>
-          <div class="identity-input-row">
-            <span class="avatar" aria-hidden="true">U</span>
-            <input id="user-id" name="user-id" value="demo-user" maxlength="128" />
-          </div>
-          <p>Conversations with the same identity share long-term memory.</p>
-        </section>
+        <nav class="primary-nav" aria-label="工作区">
+          <button class="nav-item active" type="button" data-view="chat"><span>⌁</span>对话</button>
+          <button class="nav-item" type="button" data-view="memory"><span>◇</span>记忆</button>
+          <button class="nav-item" type="button" data-view="tools"><span>⌘</span>工具与工作流</button>
+        </nav>
 
-        <section class="memory-section" aria-labelledby="memory-heading">
-          <div class="section-heading-row">
-            <div>
-              <span class="eyebrow">LONG-TERM STORE</span>
-              <h2 id="memory-heading">Memories <span id="memory-count">0</span></h2>
-            </div>
-            <button class="icon-button" id="refresh-memories" aria-label="Refresh memories">
-              <span class="refresh-icon" aria-hidden="true">↻</span>
-            </button>
-          </div>
+        <div class="sidebar-heading"><span>最近任务</span><span class="muted-label">本地</span></div>
+        <div class="conversation-list" id="conversation-list">
+          <button class="conversation-item active" type="button"><span class="conversation-dot"></span><span><strong>新建任务</strong><small>准备开始</small></span></button>
+        </div>
 
-          <div class="memory-list" id="memory-list" aria-live="polite">
-            <div class="memory-empty">
-              <span class="memory-empty-icon" aria-hidden="true">◇</span>
-              <strong>No memories yet</strong>
-              <p>Finalize a conversation to create durable memories.</p>
-            </div>
-          </div>
-        </section>
-
-        <footer class="sidebar-footer">
-          <div class="local-stack">
-            <span class="stack-light" aria-hidden="true"></span>
-            <span>
-              <strong>Local stack</strong>
-              <small>Ollama · Mem0 · Qdrant</small>
-            </span>
-          </div>
-          <a href="/docs" target="_blank" rel="noreferrer">API docs ↗</a>
-        </footer>
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-memory-card">
+          <div class="card-label"><span class="status-light"></span>本地记忆</div>
+          <strong><span id="memory-count">0</span> 条长期记忆</strong>
+          <small>SQLite · 可随项目迁移</small>
+          <button id="refresh-memories" type="button">刷新记忆 ↻</button>
+        </div>
+        <div class="sidebar-footer">
+          <div class="runtime-status"><span class="status-light" id="sidebar-status-light"></span><span id="sidebar-status">本地服务检查中</span></div>
+          <a href="/docs" target="_blank" rel="noreferrer">API 文档 ↗</a>
+        </div>
       </aside>
 
-      <main class="chat-workspace">
-        <header class="chat-header">
-          <div class="chat-header-main">
-            <button
-              class="icon-button mobile-memory-toggle"
-              id="open-sidebar"
-              aria-label="Open memories"
-            >
-              <span aria-hidden="true">◫</span>
-            </button>
-            <div>
-              <span class="eyebrow">ACTIVE SESSION</span>
-              <h1 id="conversation-title">New conversation</h1>
-            </div>
+      <main class="main-column">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button class="icon-button mobile-memory-toggle" id="open-sidebar" type="button" aria-label="打开导航">☰</button>
+            <div class="breadcrumbs"><span>本地项目</span><b>/</b><strong>Agent 工作台</strong></div>
           </div>
-
-          <div class="header-actions">
-            <div class="connection-status" id="connection-status" role="status">
-              <span class="status-dot" aria-hidden="true"></span>
-              <span id="connection-label">Checking local services</span>
-            </div>
-            <button class="finalize-button" id="finalize-conversation" type="button" disabled>
-              Finalize &amp; learn
-            </button>
+          <div class="topbar-right">
+            <div class="connection-status" id="connection-status" role="status"><span class="status-light"></span><span id="connection-label">正在检查本地服务</span></div>
+            <button class="web-toggle" id="web-toggle" type="button" aria-pressed="false"><span class="web-toggle-dot"></span><span id="web-toggle-label">外网关闭</span></button>
+            <div class="user-chip"><span>我</span><input id="user-id" name="user-id" value="demo-user" maxlength="128" aria-label="记忆身份" /></div>
+            <button class="shutdown-button" id="shutdown-button" type="button" aria-label="关闭本地 Agent" title="关闭本地 Agent 服务"><span aria-hidden="true">⏻</span></button>
           </div>
         </header>
 
-        <section class="message-scroller" id="message-scroller" aria-label="Conversation">
-          <div class="empty-state" id="empty-state">
-            <div class="empty-orbit" aria-hidden="true">
-              <span class="orbit orbit-one"></span>
-              <span class="orbit orbit-two"></span>
-              <span class="orbit-core">R</span>
-            </div>
-            <span class="eyebrow">LOCAL MEMORY AGENT</span>
-            <h2>Ask something worth remembering.</h2>
-            <p>
-              Your message stays on this machine. Relevant memories are recalled before every
-              answer, and new memories are written only when you finalize the conversation.
-            </p>
-            <div class="prompt-suggestions" aria-label="Example messages">
-              <button type="button" data-prompt="Remember that I prefer concise explanations with practical examples.">
-                <span>01</span> Save a preference
-              </button>
-              <button type="button" data-prompt="I am building this AI agent as a portfolio project. Help me plan the next milestone.">
-                <span>02</span> Plan a milestone
-              </button>
-              <button type="button" data-prompt="What do you remember about my goals and preferences?">
-                <span>03</span> Test memory recall
-              </button>
-            </div>
-          </div>
-          <div class="message-list" id="message-list" aria-live="polite"></div>
-        </section>
+        <div class="workspace-grid">
+          <section class="chat-column">
+            <header class="conversation-header">
+              <div class="conversation-title-wrap">
+                <span class="eyebrow">当前任务</span>
+                <h1 id="conversation-title">新建任务</h1>
+              </div>
+              <div class="conversation-actions">
+                <span class="latency-badge" id="latency-badge">目标 &lt;10s</span>
+                <button class="finalize-button" id="finalize-conversation" type="button" disabled>完成并学习</button>
+              </div>
+            </header>
 
-        <div class="composer-zone">
-          <form class="composer" id="chat-form">
-            <label class="sr-only" for="message-input">Message the agent</label>
-            <textarea
-              id="message-input"
-              rows="1"
-              maxlength="20000"
-              placeholder="Message your local agent…"
-              autocomplete="off"
-            ></textarea>
-            <button class="send-button" id="send-message" type="submit" aria-label="Send message">
-              <span aria-hidden="true">↑</span>
-            </button>
-          </form>
-          <div class="composer-meta">
-            <span><kbd>Enter</kbd> send · <kbd>Shift Enter</kbd> new line</span>
-            <span id="session-label">No conversation started</span>
-          </div>
+            <section class="message-scroller" id="message-scroller" aria-label="对话内容">
+              <div class="empty-state" id="empty-state">
+                <div class="welcome-icon" aria-hidden="true"><span>✦</span></div>
+                <span class="eyebrow">本地 Agent 已就绪</span>
+                <h2>从一个任务开始。</h2>
+                <p>记忆、工具和上下文都在项目目录内运行。选择右侧模型档位，告诉 Agent 你想完成什么。</p>
+                <div class="prompt-suggestions" aria-label="示例任务">
+                  <button type="button" data-prompt="请记住：我喜欢简洁、带有实际例子的解释。"><span>01</span>保存一个偏好</button>
+                  <button type="button" data-prompt="帮我把这个 Agent 规划成可以迁移到 K3COM260 的工作流。"><span>02</span>规划迁移工作流</button>
+                  <button type="button" data-prompt="检查当前项目的记忆、工具和上下文能力。"><span>03</span>检查 Agent 能力</button>
+                </div>
+              </div>
+              <div class="message-list" id="message-list" aria-live="polite"></div>
+            </section>
+
+            <div class="composer-zone">
+              <div class="uploads-strip" id="uploads-strip" aria-live="polite"></div>
+              <form class="composer" id="chat-form">
+                <label class="sr-only" for="message-input">发送消息给 Agent</label>
+                <textarea id="message-input" rows="1" maxlength="20000" placeholder="描述任务，Agent 会在本地完成…" autocomplete="off"></textarea>
+                <label class="attach-button" for="upload-input" title="上传本地文件给 Agent">
+                  <span aria-hidden="true">📎</span>
+                  <input type="file" id="upload-input" multiple hidden />
+                </label>
+                <button class="send-button" id="send-message" type="submit" aria-label="发送消息"><span>↑</span></button>
+              </form>
+              <div class="composer-meta"><span><kbd>Enter</kbd> 发送 · <kbd>Shift Enter</kbd> 换行 · <kbd>📎</kbd> 上传文件</span><span id="session-label">尚未开始任务</span></div>
+            </div>
+          </section>
+
+          <aside class="inspector" aria-label="Agent 配置">
+            <div class="inspector-header"><div><span class="eyebrow">运行配置</span><h2>Agent 控制</h2></div><span class="config-dot">●</span></div>
+
+            <section class="inspector-section">
+              <div class="section-title"><span>模型档位</span><span class="hint">本地 GGUF</span></div>
+              <div class="model-options" id="model-options">
+                <button class="model-option" type="button" data-model="qwen3-local:4b"><span class="model-radio"></span><span class="model-copy"><strong>Qwen3 4B</strong><small>最快 · 轻量工具</small></span><span class="model-status" data-model-status="qwen3-local:4b">—</span></button>
+                <button class="model-option selected" type="button" data-model="qwen3-local:8b"><span class="model-radio"></span><span class="model-copy"><strong>Qwen3 8B</strong><small>平衡 · 日常工作流</small></span><span class="recommended">推荐</span><span class="model-status" data-model-status="qwen3-local:8b">—</span></button>
+                <button class="model-option" type="button" data-model="qwen3-local:14b"><span class="model-radio"></span><span class="model-copy"><strong>Qwen3 14B</strong><small>最强 · 复杂分析</small></span><span class="model-status" data-model-status="qwen3-local:14b">—</span></button>
+              </div>
+              <p class="inspector-note" id="model-note">当前使用 Qwen3 8B，适合 K3 上的速度与质量平衡。</p>
+            </section>
+
+            <section class="inspector-section effort-section">
+              <div class="section-title"><span>调用强度</span><span class="effort-value" id="effort-value">平衡</span></div>
+              <input id="effort-range" class="effort-range" type="range" min="1" max="3" step="1" value="2" aria-label="调用强度" />
+              <div class="range-labels"><span>快速</span><span>平衡</span><span>深度</span></div>
+              <p class="inspector-note" id="effort-note">速度和质量平衡 · 最多 4 步工具调用</p>
+            </section>
+
+            <section class="inspector-section compact-section">
+              <div class="section-title"><span>外部连接</span><span class="hint" id="web-state-note">默认关闭</span></div>
+              <button class="network-card" id="network-card" type="button"><span class="network-icon">◎</span><span><strong>允许使用外网</strong><small id="network-description">仅在确认后搜索外部信息</small></span><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            </section>
+
+            <section class="inspector-section compact-section">
+              <div class="section-title"><span>会话恢复</span><span class="hint" id="resume-hint">默认关闭</span></div>
+              <button class="network-card" id="resume-card" type="button"><span class="network-icon">↻</span><span><strong>新窗口自动恢复最近对话</strong><small id="resume-description">关闭时每个标签页都是新的工作空间</small></span><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            </section>
+
+            <section class="inspector-section context-section">
+              <div class="section-title"><span>上下文</span><span class="hint">本地优先</span></div>
+              <div class="context-meter"><span id="context-meter-fill"></span></div>
+              <div class="context-meta"><span id="context-size">0 字符</span><span>记忆 + 最近消息</span></div>
+              <div class="tool-chips"><span id="memory-mode">长期记忆</span><span id="file-access-mode">本机文件</span><span>安全工作流</span></div>
+            </section>
+          </aside>
         </div>
+        <section class="view-panel hidden" id="memory-view" aria-labelledby="memory-view-title">
+          <header class="view-header"><div><span class="eyebrow">持久上下文</span><h1 id="memory-view-title">长期记忆</h1><p>完成任务后写入的记忆会保存在项目目录的 SQLite 中。</p></div><button class="panel-action" id="memory-view-refresh" type="button">刷新</button></header>
+          <div class="memory-grid" id="memory-grid"><div class="panel-empty">正在读取本地记忆…</div></div>
+        </section>
+        <section class="view-panel hidden" id="tools-view" aria-labelledby="tools-view-title">
+          <header class="view-header"><div><span class="eyebrow">可调用能力</span><h1 id="tools-view-title">工具与工作流</h1><p>这里显示 Agent 真正可调用的工具；硬件工具当前只返回安全模拟结果。</p></div><button class="panel-action" id="tools-view-refresh" type="button">刷新状态</button></header>
+          <div class="tool-layout"><div class="tool-grid" id="tool-grid"><div class="panel-empty">正在读取工具目录…</div></div><aside class="hardware-card" id="hardware-card"><span class="eyebrow">硬件网关</span><h2>安全模拟模式</h2><p id="hardware-message">正在读取状态…</p><div class="hardware-status-row"><span>相机</span><strong id="hardware-camera">检查中</strong></div><div class="hardware-status-row"><span>执行器</span><strong id="hardware-actuators">检查中</strong></div><div class="hardware-status-row"><span>YOLO</span><strong id="hardware-vision">检查中</strong></div></aside></div>
+          <div class="workflow-section"><div class="section-title"><span>可运行工作流</span><span class="hint">安全预检</span></div><div class="workflow-grid" id="workflow-grid"><div class="panel-empty">正在读取工作流…</div></div></div>
+          <div class="tool-test" id="tool-test"><div><span class="eyebrow">工具测试台</span><h2>在发送给 Agent 前测试安全工具</h2></div><div class="tool-test-row"><select id="tool-test-name" aria-label="选择工具"><option value="get_time">get_time · 当前时间</option><option value="calculator">calculator · 计算</option><option value="workspace_list">workspace_list · 本机目录</option><option value="workspace_read">workspace_read · 读取本机文件</option><option value="hardware_status">hardware_status · 硬件状态</option><option value="camera_capture">camera_capture · 相机状态</option></select><input id="tool-test-arguments" value='{"expression":"1 + 2 * 3"}' aria-label="工具参数 JSON" /><button class="panel-action" id="tool-test-run" type="button">运行</button></div><pre id="tool-test-result">选择工具后运行一次，结果会显示在这里。</pre></div>
+        </section>
       </main>
     </div>
-
+    <div class="sidebar-scrim" id="sidebar-scrim" aria-hidden="true"></div>
     <div class="toast-region" id="toast-region" aria-live="assertive"></div>
   </body>
 </html>

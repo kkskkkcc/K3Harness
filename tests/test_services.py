@@ -8,7 +8,11 @@ from self_learning_agent.domain import (
     MessageRole,
     TranscriptMessage,
 )
-from self_learning_agent.services import validate_summary_sources
+from self_learning_agent.services import (
+    _attach_web_evidence,
+    is_durable_user_statement,
+    validate_summary_sources,
+)
 
 
 def transcript_message() -> TranscriptMessage:
@@ -112,3 +116,30 @@ def test_explicit_profile_statements_become_memory_candidates() -> None:
         "The user's name is Dilep.",
         "The user's favorite game is Cricket.",
     ]
+
+
+def test_web_evidence_is_visible_when_model_omits_sources() -> None:
+    context = "外网搜索结果（DuckDuckGo，请核对来源）：\n1. Example\n   来源：https://example.com"
+    answer = _attach_web_evidence("无法确定。", context)
+    assert "https://example.com" in answer
+
+
+def test_failed_web_search_is_not_appended_to_answer() -> None:
+    # A failed search context must not be folded into the assistant answer,
+    # otherwise small models echo it as if it were real search output.
+    failure = "外网搜索失败：DuckDuckGo超时。请稍后重试。"
+    timeout = "外网搜索超时（14秒）。请稍后重试。"
+    assert _attach_web_evidence("模型给的回复。", failure) == "模型给的回复。"
+    assert _attach_web_evidence("模型给的回复。", timeout) == "模型给的回复。"
+
+
+def test_chinese_full_width_question_is_not_a_durable_statement() -> None:
+    # A Chinese full-width question mark closes a sentence the same way as an
+    # ASCII question mark; without this guard such content would be written
+    # into long-term memory as if it were a user fact.
+    assert is_durable_user_statement("你怎么看这个项目？") is False
+    assert is_durable_user_statement("How does this work?") is False
+
+
+def test_durable_chinese_statement_still_passes() -> None:
+    assert is_durable_user_statement("我比较喜欢简洁一点的回答") is True

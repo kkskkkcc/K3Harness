@@ -26,6 +26,15 @@ class ConversationRepository:
     async def get(self, conversation_id: UUID) -> Conversation | None:
         return await self.session.get(Conversation, conversation_id)
 
+    async def list_for_user(self, user_id: str, limit: int = 50) -> list[Conversation]:
+        statement = (
+            select(Conversation)
+            .where(Conversation.user_id == user_id)
+            .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+            .limit(limit)
+        )
+        return list((await self.session.scalars(statement)).all())
+
     async def add_message(self, conversation_id: UUID, role: str, content: str) -> Message:
         message = Message(conversation_id=conversation_id, role=role, content=content)
         self.session.add(message)
@@ -73,6 +82,15 @@ class ConversationRepository:
         self.session.add(stored)
         await self.session.flush()
         return stored
+
+    async def latest_summary(self, conversation_id: UUID) -> StoredConversationSummary | None:
+        statement = (
+            select(StoredConversationSummary)
+            .where(StoredConversationSummary.conversation_id == conversation_id)
+            .order_by(StoredConversationSummary.version.desc())
+            .limit(1)
+        )
+        return await self.session.scalar(statement)
 
     async def finalize(self, conversation: Conversation) -> None:
         conversation.status = "finalized"

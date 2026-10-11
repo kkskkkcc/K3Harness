@@ -1,0 +1,4 @@
+FROM ./Qwen3-14B-Q4_K_M.gguf
+PARAMETER num_ctx 16384
+PARAMETER temperature 0.2
+PARAMETER top_p 0.8

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -80,8 +80,42 @@ class ConversationRead(BaseModel):
     created_at: datetime
 
 
+class ConversationMessageRead(BaseModel):
+    id: UUID
+    role: MessageRole
+    content: str
+    created_at: datetime
+
+
+class ConversationListItem(BaseModel):
+    id: UUID
+    user_id: str
+    status: ConversationStatus
+    created_at: datetime
+    title: str
+    preview: str = ""
+    message_count: int = 0
+
+
+class ConversationDetail(BaseModel):
+    id: UUID
+    user_id: str
+    status: ConversationStatus
+    created_at: datetime
+    messages: list[ConversationMessageRead]
+    summary: ConversationSummary | None = None
+
+
 class ChatRequest(BaseModel):
     content: str = Field(min_length=1, max_length=20_000)
+    use_web: bool = False
+    model: Literal["qwen3-local:4b", "qwen3-local:8b", "qwen3-local:14b"] | None = None
+    reasoning_effort: Literal["fast", "balanced", "deep"] = "balanced"
+
+
+class ToolRunRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    arguments: dict = Field(default_factory=dict)
 
 
 class ChatResponse(BaseModel):
@@ -89,6 +123,7 @@ class ChatResponse(BaseModel):
     message_id: UUID
     content: str
     recalled_memories: list[RetrievedMemory]
+    web_status: str | None = None
 
 
 class FinalizeResponse(BaseModel):

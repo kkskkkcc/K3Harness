@@ -22,8 +22,10 @@ from self_learning_agent.errors import (
 )
 from self_learning_agent.llm import LLMGateway
 from self_learning_agent.memory import MemoryStore
+from self_learning_agent.model_profiles import canonical_model_id
 from self_learning_agent.models import Conversation, Message
 from self_learning_agent.repositories import ConversationRepository
+from self_learning_agent.web_search import search_web
 
 
 def to_transcript(messages: list[Message]) -> list[TranscriptMessage]:
@@ -43,6 +45,11 @@ def is_durable_user_statement(content: str) -> bool:
     normalized = " ".join(content.lower().split())
     if len(normalized) < 8 or normalized in {"hello", "hi there", "hey there"}:
         return False
+    # Both ASCII and full-width punctuation close a Chinese question the same
+    # way, and Chinese users frequently type questions starting with the same
+    # English question words as English speakers ("what", "how", ...).
+    if normalized.endswith(("?", "？")):
+        return False
     request_prefixes = (
         "can ",
         "could ",
@@ -58,7 +65,7 @@ def is_durable_user_statement(content: str) -> bool:
         "why ",
         "how ",
     )
-    return not normalized.endswith("?") and not normalized.startswith(request_prefixes)
+    return not normalized.startswith(request_prefixes)
 
 
 def explicit_user_memory_candidates(
@@ -128,12 +135,54 @@ def validate_summary_sources(
             candidates.append(candidate.model_copy(update={"source_message_ids": valid_sources}))
 
     known_contents = {candidate.content.casefold() for candidate in candidates}
+
+    def equivalent_memory(candidate: MemoryCandidate) -> bool:
+        candidate_words = set(re.findall(r"\w+", candidate.content.casefold()))
+        for existing in candidates:
+            if not candidate.source_message_ids or not existing.source_message_ids:
+                continue
+            if not set(candidate.source_message_ids) & set(existing.source_message_ids):
+                continue
+            existing_words = set(re.findall(r"\w+", existing.content.casefold()))
+            overlap = len(candidate_words & existing_words) / max(
+                1, min(len(candidate_words), len(existing_words))
+            )
+            if overlap >= 0.6:
+                return True
+        return False
+
     for candidate in explicit_user_memory_candidates(messages):
-        if candidate.content.casefold() not in known_contents:
+        if candidate.content.casefold() not in known_contents and not equivalent_memory(candidate):
             candidates.append(candidate)
             known_contents.add(candidate.content.casefold())
 
     return summary.model_copy(update={"candidate_memories": candidates})
+
+
+def _attach_web_evidence(answer: str, web_context: str) -> str:
+    """Keep usable search evidence visible when a small model ignores the context.
+
+    A failed search context is intentionally **not** appended: the failure
+    notice is meant for the operator, and appending it to a small model's
+    answer tends to make the model echo or paraphrase the failure as if it
+    were real search output.
+    """
+    if not web_context or "外网搜索" not in web_context:
+        return answer
+    # A failed search is a status, not evidence. Return the answer untouched
+    # so the model is never forced to restate the failure as a finding.
+    if web_context.startswith("外网搜索失败") or web_context.startswith("外网搜索超时"):
+        return answer
+    source_urls = [
+        line.split("来源：", 1)[1].strip()
+        for line in web_context.splitlines()
+        if "来源：" in line
+    ]
+    if source_urls and any(url in answer for url in source_urls):
+        return answer
+    if web_context.startswith("外网搜索结果"):
+        return f"{answer}\n\n{web_context}"
+    return answer
 
 
 class AgentService:
@@ -155,7 +204,14 @@ class AgentService:
         await self.session.commit()
         return conversation
 
-    async def chat(self, conversation_id: UUID, content: str) -> ChatResponse:
+    async def chat(
+        self,
+        conversation_id: UUID,
+        content: str,
+        use_web: bool = False,
+        model: str | None = None,
+        reasoning_effort: str = "balanced",
+    ) -> ChatResponse:
         conversation = await self._active_conversation(conversation_id)
         await self.conversations.add_message(conversation_id, MessageRole.USER.value, content)
         await self.session.commit()
@@ -168,17 +224,53 @@ class AgentService:
         )
         await self.session.commit()
 
-        answer = await self.llm.answer(content, to_transcript(recent_records), recalled)
+        web_context = (
+            await search_web(content, proxy_url=self.settings.web_search_proxy)
+            if use_web
+            else ""
+        )
+        selected_model = canonical_model_id(model, self.settings.ollama_chat_model)
+        if use_web:
+            answer = await self.llm.answer(
+                content,
+                to_transcript(recent_records),
+                recalled,
+                web_context=web_context,
+                model=selected_model,
+                reasoning_effort=reasoning_effort,
+            )
+        else:
+            answer = await self.llm.answer(
+                content,
+                to_transcript(recent_records),
+                recalled,
+                model=selected_model,
+                reasoning_effort=reasoning_effort,
+            )
+        if use_web:
+            answer = _attach_web_evidence(answer, web_context)
         assistant_message = await self.conversations.add_message(
             conversation_id, MessageRole.ASSISTANT.value, answer
         )
         await self.session.commit()
+
+        # Surface the search status separately so a failed web search is
+        # visible to the operator without being folded into the assistant's
+        # answer (which would invite the model to echo it as if it were real
+        # search output).
+        web_status: str | None = None
+        if use_web:
+            if web_context.startswith("外网搜索失败"):
+                web_status = web_context
+            elif web_context.startswith("外网搜索超时"):
+                web_status = web_context
 
         return ChatResponse(
             conversation_id=conversation_id,
             message_id=assistant_message.id,
             content=answer,
             recalled_memories=recalled,
+            web_status=web_status,
         )
 
     async def finalize(self, conversation_id: UUID) -> FinalizeResponse:

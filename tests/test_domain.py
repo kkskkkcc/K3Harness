@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from self_learning_agent.domain import MemoryCandidate, MemoryType
+from self_learning_agent.domain import ChatRequest, MemoryCandidate, MemoryType
 
 
 def test_memory_candidate_requires_source_provenance() -> None:
@@ -24,3 +24,8 @@ def test_memory_candidate_rejects_out_of_range_confidence() -> None:
             confidence=1.1,
             source_message_ids=[uuid4()],
         )
+
+
+def test_chat_request_external_web_is_opt_in() -> None:
+    assert ChatRequest(content="hello").use_web is False
+    assert ChatRequest(content="hello", use_web=True).use_web is True

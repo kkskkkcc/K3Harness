@@ -1,0 +1,3 @@
+mkdir "D:\深圳开发者项目" 2>nul
+curl.exe -L -C - --fail --output "D:\深圳开发者项目\Qwen3-4B-Q4_K_M.gguf" "https://archive.spacemit.com/spacemit-ai/model_zoo/llm/Qwen3-4B-Q4_K_M.gguf"
+curl.exe --http1.1 -L -C - --fail --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 --output "D:\深圳开发者项目\Qwen3-14B-Q4_K_M.gguf" "https://modelscope.cn/models/unsloth/Qwen3-14B-GGUF/resolve/master/Qwen3-14B-Q4_K_M.gguf"

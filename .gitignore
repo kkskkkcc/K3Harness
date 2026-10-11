@@ -1,10 +1,16 @@
 .env
+.env.*
+!.env.example
 .venv/
+.deps/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 .data/
+cache/
+data/
+workspace/
 .coverage
 htmlcov/
 dist/
@@ -15,3 +21,8 @@ build/
 .codex/
 references/
 *.log
+
+# Local model weights and Ollama runtime cache are intentionally not committed.
+*.gguf
+models/ollama/
+models/ollama-cache-old/
