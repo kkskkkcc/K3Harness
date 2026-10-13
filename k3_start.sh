@@ -37,7 +37,9 @@ else
   # A running server with another alias must be replaced when the operator
   # switches 4b/8b/14b; otherwise the API would advertise a model that is not
   # actually loaded.
-  pkill -f 'llama-server --model' 2>/dev/null || true
+  # Match only the server executable; ``pkill -f`` can also match the shell
+  # command that is invoking this script during an SSH model switch.
+  pkill -x llama-server 2>/dev/null || true
   sleep 2
 fi
 if [[ "$MODEL_READY" != "1" ]]; then
