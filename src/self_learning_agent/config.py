@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     camera_backend: Literal["none", "opencv", "gstreamer"] = "none"
     yolo_model_path: str = "./models/yolo"
 
+    # K3 ships an optimized llama-server instead of Ollama.  The OpenAI
+    # compatible backend keeps the same model/profile/tool API while allowing
+    # the runtime to point at llama-server (or another compatible endpoint).
+    llm_backend: Literal["ollama", "openai_compatible"] = "ollama"
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+
     ollama_base_url: str = "http://localhost:11434"
     # The local GGUF profiles are imported into Ollama as qwen3-local:*.
     # 8B is the speed/quality default for the K3 migration target.

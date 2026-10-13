@@ -23,11 +23,14 @@ DEPS_DIR = PROJECT_ROOT / ".deps"
 
 # Make the package under test importable without relying on the host's global
 # PYTHONPATH. The runtime launcher (``start.ps1`` / ``start.sh``) sets the same
-# variables, but tests should not require a manual setup step.
-for path in (SRC_DIR, DEPS_DIR):
+# variables, but tests should not require a manual setup step. Source must be
+# ahead of the vendored dependency directory: ``.deps`` may contain an older
+# copied package from a previous local setup and must never mask current code.
+for path in (DEPS_DIR, SRC_DIR):
     resolved = str(path)
-    if resolved not in sys.path:
-        sys.path.insert(0, resolved)
+    while resolved in sys.path:
+        sys.path.remove(resolved)
+    sys.path.insert(0, resolved)
 
 
 def _sanitize(value: str | None) -> str | None:

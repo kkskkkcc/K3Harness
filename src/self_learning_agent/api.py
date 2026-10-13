@@ -36,7 +36,7 @@ from self_learning_agent.errors import (
     MemoryNotFoundError,
 )
 from self_learning_agent.hardware_gateway import SimulatedHardwareKernel
-from self_learning_agent.llm import OllamaLLMGateway
+from self_learning_agent.llm import LLMGateway, OllamaLLMGateway, OpenAICompatibleLLMGateway
 from self_learning_agent.memory import LocalMemoryStore, Mem0MemoryStore
 from self_learning_agent.model_profiles import canonical_model_id, list_model_profiles
 from self_learning_agent.repositories import ConversationRepository
@@ -95,14 +95,19 @@ def model_http_error(exc: ResponseError) -> HTTPException:
 
 
 @lru_cache
-def get_local_components() -> tuple[Settings, OllamaLLMGateway, LocalMemoryStore | Mem0MemoryStore]:
+def get_local_components() -> tuple[Settings, LLMGateway, LocalMemoryStore | Mem0MemoryStore]:
     settings = get_settings()
     memory = (
         LocalMemoryStore(settings)
         if settings.memory_backend == "local"
         else Mem0MemoryStore(settings)
     )
-    return settings, OllamaLLMGateway(settings), memory
+    gateway: LLMGateway
+    if settings.llm_backend == "openai_compatible":
+        gateway = OpenAICompatibleLLMGateway(settings)
+    else:
+        gateway = OllamaLLMGateway(settings)
+    return settings, gateway, memory
 
 
 def get_agent_service(session: AsyncSession = Depends(get_session)) -> AgentService:
@@ -138,9 +143,17 @@ async def runtime() -> dict[str, object]:
     ollama_online = False
     try:
         async with httpx.AsyncClient(trust_env=False, timeout=2) as client:
-            response = await client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
-            response.raise_for_status()
-            registered = {item["name"] for item in response.json().get("models", [])}
+            if settings.llm_backend == "openai_compatible":
+                base = (settings.llm_base_url or settings.ollama_base_url).rstrip("/")
+                response = await client.get(f"{base}/models")
+                response.raise_for_status()
+                registered = {
+                    item["id"] for item in response.json().get("data", []) if "id" in item
+                }
+            else:
+                response = await client.get(f"{settings.ollama_base_url.rstrip('/')}/api/tags")
+                response.raise_for_status()
+                registered = {item["name"] for item in response.json().get("models", [])}
             ollama_online = True
     except (httpx.HTTPError, ValueError, KeyError):
         pass
@@ -189,7 +202,7 @@ async def _embedding_available(settings: Settings, registered: set[str]) -> bool
     "semantic memory" on an installation that actually only has the legacy
     endpoint available.
     """
-    if settings.ollama_embedding_model not in registered:
+    if settings.llm_backend != "ollama" or settings.ollama_embedding_model not in registered:
         return False
     base = settings.ollama_base_url.rstrip("/")
     payload_embed = {"model": settings.ollama_embedding_model, "input": "ping"}
@@ -362,8 +375,10 @@ async def send_message(
         raise model_http_error(exc) from exc
     except (ConnectionError, httpx.RequestError) as exc:
         raise HTTPException(
-            status_code=503, detail="无法连接本地 Ollama，请重新运行一键启动。"
+            status_code=503, detail="无法连接本地模型服务，请检查 llama-server/Ollama 是否已启动。"
         ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:500]) from exc
     except TimeoutError as exc:
         raise HTTPException(
             status_code=504, detail="模型响应超时，请选择较小模型或降低调用强度。"
@@ -388,8 +403,10 @@ async def finalize_conversation(
         raise model_http_error(exc) from exc
     except (ConnectionError, httpx.RequestError) as exc:
         raise HTTPException(
-            status_code=503, detail="无法连接本地 Ollama，请重新运行一键启动。"
+            status_code=503, detail="无法连接本地模型服务，请检查 llama-server/Ollama 是否已启动。"
         ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:500]) from exc
 
 
 @app.get("/v1/users/{user_id}/memories", response_model=list[MemoryRead])

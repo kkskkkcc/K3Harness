@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Protocol
+import logging
+from typing import Any, Protocol
 
+import httpx
+from pydantic import ValidationError
 from ollama import AsyncClient
 
 from self_learning_agent.config import Settings
@@ -14,6 +17,8 @@ from self_learning_agent.domain import (
 )
 from self_learning_agent.model_profiles import EFFORT_PROFILES, canonical_model_id
 from self_learning_agent.tools import TOOL_SCHEMAS, execute_tool
+
+logger = logging.getLogger(__name__)
 
 SUMMARY_INSTRUCTIONS = """
 You summarize a complete conversation for a long-term memory system.
@@ -113,6 +118,38 @@ def parse_conversation_summary(content: str) -> ConversationSummary:
             if isinstance(wrapped, dict):
                 payload = wrapped
                 break
+        # Small Qwen deployments sometimes emit a compact string list for
+        # candidate_memories even though the schema asks for objects. Dropping
+        # malformed candidates is safer than inventing source IDs or storing
+        # unsupported assistant text; explicit durable user statements are
+        # recovered separately by services.validate_summary_sources().
+        candidates = payload.get("candidate_memories")
+        if isinstance(candidates, list):
+            payload["candidate_memories"] = [
+                item
+                for item in candidates
+                if isinstance(item, dict)
+                and all(
+                    key in item
+                    for key in ("content", "memory_type", "confidence", "source_message_ids")
+                )
+                and isinstance(item.get("source_message_ids"), list)
+            ]
+        # Qwen3 4B may spend its small summary budget on a partial field-only
+        # object. Keep the summary usable and let source validation decide
+        # whether any memory is durable; never promote those partial objects
+        # into memories by guessing their provenance.
+        payload.setdefault("synopsis", "对话已完成，未提取到可验证的长期记忆。")
+        for field in (
+            "user_goals",
+            "confirmed_facts",
+            "preferences",
+            "decisions",
+            "open_questions",
+            "successful_actions",
+            "failed_actions",
+        ):
+            payload.setdefault(field, [])
     return ConversationSummary.model_validate(payload)
 
 
@@ -307,3 +344,246 @@ class OllamaLLMGateway:
             keep_alive=self._keep_alive,
         )
         return parse_conversation_summary(response.message.content)
+
+
+class OpenAICompatibleLLMGateway:
+    """Gateway for llama-server and other OpenAI-compatible local runtimes.
+
+    K3 provides a SpacemiT-optimized ``llama-server`` binary.  This gateway
+    deliberately mirrors the Ollama gateway's tool loop and memory summary
+    contract so the rest of the application remains backend agnostic.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        base_url = (settings.llm_base_url or settings.ollama_base_url).rstrip("/")
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers=(
+                {"Authorization": f"Bearer {settings.llm_api_key}"}
+                if settings.llm_api_key
+                else {}
+            ),
+            trust_env=False,
+            timeout=settings.response_timeout_seconds,
+        )
+        self._chat_model = settings.ollama_chat_model
+        self._summary_model = settings.ollama_summary_model
+        self._settings = settings
+        self._workspace = settings.agent_workspace
+        self._project_root = getattr(settings, "project_root", ".")
+        self._context_char_budget = settings.context_char_budget
+        self._max_tool_steps = settings.max_tool_steps
+        self._response_timeout = settings.response_timeout_seconds
+        self._tool_timeout = settings.tool_timeout_seconds
+        self._chat_max_tokens = settings.ollama_chat_max_tokens
+        self._summary_max_tokens = settings.ollama_summary_max_tokens
+
+    async def _post(self, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        try:
+            response = await self._client.post(
+                "/chat/completions", json=payload, timeout=timeout
+            )
+            response.raise_for_status()
+            result = response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:500]
+            raise RuntimeError(
+                f"兼容模型服务调用失败（HTTP {exc.response.status_code}）：{detail}"
+            ) from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ConnectionError(f"无法连接兼容模型服务：{exc}") from exc
+        if not isinstance(result, dict):
+            raise RuntimeError("兼容模型服务返回了无效响应")
+        return result
+
+    @staticmethod
+    def _message(result: dict[str, Any]) -> dict[str, Any]:
+        choices = result.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError("兼容模型服务没有返回 choices")
+        message = choices[0].get("message")
+        if not isinstance(message, dict):
+            raise RuntimeError("兼容模型服务没有返回有效 message")
+        return message
+
+    async def answer(
+        self,
+        question: str,
+        recent_messages: list[TranscriptMessage],
+        memories: list[RetrievedMemory],
+        web_context: str | None = None,
+        model: str | None = None,
+        reasoning_effort: str = "balanced",
+    ) -> str:
+        effort = EFFORT_PROFILES.get(reasoning_effort, EFFORT_PROFILES["balanced"])
+        selected_model = canonical_model_id(model, self._chat_model)
+        max_tool_steps = int(effort["max_tool_steps"])
+        context_budget = min(self._context_char_budget, int(effort["context_char_budget"]))
+        payload_data: dict[str, object] = {
+            "USER_LATEST_QUESTION": question,
+            "filesystem_access": {
+                "mode": self._settings.file_access_mode,
+                "workspace": self._workspace,
+                "project_root": self._project_root,
+                "read_only": True,
+            },
+            "recent_messages": [
+                {"role": message.role.value, "content": message.content}
+                for message in recent_messages
+            ],
+            "retrieved_memories": [
+                {"content": memory.content, "score": memory.score, "metadata": memory.metadata}
+                for memory in memories
+            ],
+        }
+        if web_context:
+            payload_data["external_web_context"] = web_context
+        encoded = json.dumps(payload_data, ensure_ascii=False)
+        if len(encoded) > context_budget:
+            encoded = encoded[-context_budget:]
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": ANSWER_INSTRUCTIONS},
+            {"role": "user", "content": encoded},
+        ]
+        deadline = asyncio.get_running_loop().time() + self._response_timeout
+        for _ in range(max_tool_steps + 1):
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError("Model response deadline exceeded")
+            request_payload: dict[str, Any] = {
+                    "model": selected_model,
+                    "messages": messages,
+                    "tools": TOOL_SCHEMAS,
+                    "tool_choice": "auto",
+                    "temperature": 0.2,
+                    "max_tokens": int(effort["max_tokens"]),
+                    "stream": False,
+            }
+            if self._settings.ollama_disable_thinking:
+                # llama.cpp's Qwen3 template understands this OpenAI-compatible
+                # extension and skips hidden reasoning tokens, preserving the
+                # response budget for the visible answer/tool call.
+                request_payload["chat_template_kwargs"] = {"enable_thinking": False}
+            result = await self._post(
+                request_payload,
+                remaining,
+            )
+            message = self._message(result)
+            tool_calls = message.get("tool_calls") or []
+            if not isinstance(tool_calls, list) or not tool_calls:
+                return str(message.get("content") or "").strip()
+            assistant_calls: list[dict[str, Any]] = []
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": message.get("content") or "",
+                    "tool_calls": tool_calls,
+                }
+            )
+            for index, call in enumerate(tool_calls):
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function") or {}
+                name = str(function.get("name") or "")
+                raw_arguments = function.get("arguments") or {}
+                if isinstance(raw_arguments, str):
+                    try:
+                        arguments = json.loads(raw_arguments)
+                    except json.JSONDecodeError:
+                        arguments = {}
+                else:
+                    arguments = raw_arguments
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                assistant_calls.append(
+                    {
+                        "id": str(call.get("id") or f"call_{index}"),
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": json.dumps(arguments, ensure_ascii=False),
+                        },
+                    }
+                )
+                try:
+                    tool_remaining = max(0.1, deadline - asyncio.get_running_loop().time())
+                    tool_result = await asyncio.wait_for(
+                        execute_tool(
+                            name,
+                            arguments,
+                            self._workspace,
+                            project_root=self._project_root,
+                            settings=self._settings,
+                        ),
+                        timeout=min(self._tool_timeout, tool_remaining),
+                    )
+                except TimeoutError:
+                    tool_result = "tool error: 工具执行超时"
+                except Exception as exc:
+                    tool_result = f"tool error: {exc}"
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": str(call.get("id") or f"call_{index}"),
+                        "content": tool_result,
+                    }
+                )
+            # Some OpenAI-compatible servers validate the assistant tool call
+            # ids strictly; replace the raw call list with normalized values.
+            messages[-(len(tool_calls) + 1)] ["tool_calls"] = assistant_calls
+        return "I could not complete the tool-assisted step within the configured limit."
+
+    async def summarize(self, messages: list[TranscriptMessage]) -> ConversationSummary:
+        transcript = [
+            {
+                "id": str(message.id),
+                "role": message.role.value,
+                "content": message.content if message.role.value == "user" else message.content[:240],
+                "created_at": message.created_at.isoformat(),
+            }
+            for message in messages
+        ]
+        user_memory_sources = [
+            {"id": str(message.id), "content": message.content}
+            for message in messages
+            if message.role.value == "user"
+        ]
+        request = {
+            "model": self._summary_model,
+            "messages": [
+                {"role": "system", "content": SUMMARY_INSTRUCTIONS},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "user_messages_eligible_as_memory_sources": user_memory_sources,
+                            "transcript": transcript,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            "temperature": 0,
+            "max_tokens": self._summary_max_tokens,
+            "response_format": {"type": "json_object"},
+            "stream": False,
+        }
+        if self._settings.ollama_disable_thinking:
+            request["chat_template_kwargs"] = {"enable_thinking": False}
+        try:
+            result = await self._post(request, self._response_timeout)
+        except RuntimeError as exc:
+            # Older llama-server builds may reject response_format. Retry the
+            # same request without it; the parser still validates the JSON.
+            if "response_format" not in str(exc):
+                raise
+            request.pop("response_format", None)
+            result = await self._post(request, self._response_timeout)
+        content = str(self._message(result).get("content") or "").strip()
+        if not content:
+            raise RuntimeError("模型摘要返回空内容，请降低调用强度或检查模型服务。")
+        logger.warning("OpenAI-compatible summary raw content: %s", content[:2000])
+        try:
+            return parse_conversation_summary(content)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise RuntimeError("模型摘要返回的 JSON 无法解析，请重试或使用 4B/8B 模型。") from exc

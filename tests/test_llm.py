@@ -48,3 +48,20 @@ def test_summary_parser_accepts_small_model_wrapper() -> None:
     )
 
     assert summary.synopsis == "A short conversation."
+
+
+def test_summary_parser_drops_string_memory_candidates() -> None:
+    summary = parse_conversation_summary(
+        '{"synopsis":"A short conversation.","candidate_memories":["unsupported"]}'
+    )
+
+    assert summary.candidate_memories == []
+
+
+def test_summary_parser_accepts_partial_small_model_object() -> None:
+    summary = parse_conversation_summary(
+        '{"candidate_memories":[{"id":"ignored","content":"request"}]}'
+    )
+
+    assert summary.synopsis.startswith("对话已完成")
+    assert summary.candidate_memories == []
