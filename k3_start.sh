@@ -4,8 +4,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 MODEL_TAG="${MODEL_TAG:-4b}"
 LLAMA_PORT="${LLAMA_PORT:-8080}"
-LLAMA_THREADS="${LLAMA_THREADS:-4}"
+# K3-CoM260 exposes eight A100 performance cores to the SpacemiT backend.
+# Keep generation and prompt processing on that same preferred-core pool.
+LLAMA_THREADS="${LLAMA_THREADS:-8}"
+LLAMA_THREADS_BATCH="${LLAMA_THREADS_BATCH:-$LLAMA_THREADS}"
 LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-4096}"
+LLAMA_BATCH_SIZE="${LLAMA_BATCH_SIZE:-2048}"
+LLAMA_UBATCH_SIZE="${LLAMA_UBATCH_SIZE:-512}"
+LLAMA_FLASH_ATTN="${LLAMA_FLASH_ATTN:-on}"
 LLAMA_POLL="${LLAMA_POLL:-0}"
 START_AGENT="${START_AGENT:-1}"
 case "$MODEL_TAG" in
@@ -44,6 +50,10 @@ if [[ "$MODEL_READY" != "1" ]]; then
     --jinja \
     --ctx-size "$LLAMA_CTX_SIZE" \
     --threads "$LLAMA_THREADS" \
+    --threads-batch "$LLAMA_THREADS_BATCH" \
+    --batch-size "$LLAMA_BATCH_SIZE" \
+    --ubatch-size "$LLAMA_UBATCH_SIZE" \
+    --flash-attn "$LLAMA_FLASH_ATTN" \
     --poll "$LLAMA_POLL" \
     --parallel 1 \
     >"$PWD/logs/llama-server.log" 2>&1 &
