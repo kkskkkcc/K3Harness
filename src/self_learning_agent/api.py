@@ -40,7 +40,11 @@ from self_learning_agent.errors import (
 from self_learning_agent.hardware_gateway import SimulatedHardwareKernel
 from self_learning_agent.llm import LLMGateway, OllamaLLMGateway, OpenAICompatibleLLMGateway
 from self_learning_agent.memory import LocalMemoryStore, Mem0MemoryStore
-from self_learning_agent.model_profiles import canonical_model_id, list_model_profiles
+from self_learning_agent.model_profiles import (
+    canonical_model_id,
+    list_model_profiles,
+    model_file_available,
+)
 from self_learning_agent.repositories import ConversationRepository
 from self_learning_agent.services import AgentService
 from self_learning_agent.tools import TOOL_SCHEMAS, execute_tool
@@ -218,10 +222,13 @@ async def switch_runtime_model(payload: ModelSwitchRequest) -> dict[str, object]
         "qwen3-local:14b": "Qwen3-14B-Q4_K_M.gguf",
     }
     model_file = project_root / model_files[payload.model]
-    if not model_file.is_file():
+    if not model_file_available(payload.model, model_file):
         raise HTTPException(
             status_code=404,
-            detail=f"K3 上尚未部署 {payload.model} 对应的 GGUF 文件：{model_file.name}",
+            detail=(
+                f"K3 上尚未部署完整的 {payload.model} GGUF 文件：{model_file.name}"
+                "（可能仍在传输或校验失败）"
+            ),
         )
     script = project_root / "k3_start.sh"
     if os.name != "posix" or not script.is_file():

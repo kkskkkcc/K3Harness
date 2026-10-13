@@ -8,6 +8,15 @@ ReasoningEffort = Literal["fast", "balanced", "deep"]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+# GGUF sizes are part of the release manifest.  Checking only ``exists()``
+# would expose a partially copied 9 GB model while it is still being sent to
+# K3, allowing the web UI to start a broken server.
+MODEL_FILE_BYTES = {
+    "qwen3-local:4b": 2_497_280_256,
+    "qwen3-local:8b": 5_027_783_488,
+    "qwen3-local:14b": 9_001_753_984,
+}
+
 MODEL_PROFILES: dict[str, dict[str, object]] = {
     "qwen3-local:4b": {
         "label": "Qwen3 4B",
@@ -74,6 +83,18 @@ def canonical_model_id(model: str | None, default: str) -> str:
     return candidate if candidate in MODEL_PROFILES else "qwen3-local:8b"
 
 
+def model_file_available(model_id: str, path: Path | None = None) -> bool:
+    """Return true only for a complete release GGUF, never a partial copy."""
+    expected = MODEL_FILE_BYTES.get(model_id)
+    if expected is None:
+        return False
+    target = path or (PROJECT_ROOT / str(MODEL_PROFILES[model_id]["file"]))
+    try:
+        return target.is_file() and target.stat().st_size == expected
+    except OSError:
+        return False
+
+
 def list_model_profiles() -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
     for model_id, profile in MODEL_PROFILES.items():
@@ -82,7 +103,7 @@ def list_model_profiles() -> list[dict[str, object]]:
             {
                 "id": model_id,
                 **profile,
-                "file_available": file_path.exists(),
+                "file_available": model_file_available(model_id, file_path),
             }
         )
     return result
