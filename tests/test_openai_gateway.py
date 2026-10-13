@@ -43,7 +43,25 @@ async def test_openai_gateway_sends_qwen3_no_thinking_extension() -> None:
     assert answer == "READY"
     assert requests[0]["model"] == "qwen3-local:4b"
     assert requests[0]["chat_template_kwargs"] == {"enable_thinking": False}
-    assert requests[0]["tools"]
+    assert "tools" not in requests[0]
+
+
+async def test_openai_gateway_sends_only_filesystem_tools_for_file_question() -> None:
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "READY"}}]},
+        )
+
+    await _gateway(handler).answer("请读取 /root/k3-agent/README.md", [], [])
+    names = {
+        item["function"]["name"]
+        for item in requests[0]["tools"]
+    }
+    assert names == {"workspace_list", "workspace_read"}
 
 
 async def test_openai_gateway_parses_json_summary() -> None:

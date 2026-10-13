@@ -16,9 +16,38 @@ from self_learning_agent.domain import (
     TranscriptMessage,
 )
 from self_learning_agent.model_profiles import EFFORT_PROFILES, canonical_model_id
-from self_learning_agent.tools import TOOL_SCHEMAS, execute_tool
+from self_learning_agent.tools import execute_tool, extract_explicit_path, select_tool_schemas
 
 logger = logging.getLogger(__name__)
+
+
+async def _prefetch_explicit_file(
+    question: str,
+    workspace: str,
+    project_root: str,
+    settings: Settings,
+    timeout: float,
+) -> str:
+    path = extract_explicit_path(question)
+    if not path:
+        return ""
+    try:
+        result = await asyncio.wait_for(
+            execute_tool(
+                "workspace_read",
+                {"path": path},
+                workspace,
+                project_root=project_root,
+                settings=settings,
+            ),
+            timeout=timeout,
+        )
+    except Exception:
+        return ""
+    # Keep one-shot file requests from turning a modest README into a second
+    # multi-thousand-token prompt on the K3 CPU.
+    return f"路径：{path}\n{result[:6000]}"
+
 
 SUMMARY_INSTRUCTIONS = """
 You summarize a complete conversation for a long-term memory system.
@@ -72,6 +101,9 @@ context says that search failed, explain that limitation instead of claiming tha
 you searched successfully. When search results are already supplied, do not call
 an unrelated tool for the current time or another verification step; answer from
 the supplied results and clearly label anything the sources do not establish.
+If ``prefetched_file_context`` is present, it is the result of a safe read of
+the explicit path in the current question. Use it directly and do not call
+``workspace_read`` again for the same path.
 """.strip()
 
 SUMMARY_JSON_SCHEMA = {
@@ -239,6 +271,15 @@ class OllamaLLMGateway:
             # turns even when the current question had nothing to do with
             # network access.
             payload["external_web_context"] = web_context
+        prefetched_file = await _prefetch_explicit_file(
+            question,
+            self._workspace,
+            self._project_root,
+            self._settings,
+            self._tool_timeout,
+        )
+        if prefetched_file:
+            payload["prefetched_file_context"] = prefetched_file
         encoded = json.dumps(payload, ensure_ascii=False)
         if len(encoded) > context_budget:
             encoded = encoded[-context_budget:]
@@ -246,21 +287,24 @@ class OllamaLLMGateway:
             {"role": "system", "content": ANSWER_INSTRUCTIONS},
             {"role": "user", "content": encoded},
         ]
+        selected_tools = [] if prefetched_file else select_tool_schemas(question)
         deadline = asyncio.get_running_loop().time() + self._response_timeout
         for _ in range(max_tool_steps + 1):
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise TimeoutError("Model response deadline exceeded")
             try:
+                chat_request: dict[str, Any] = {
+                    "model": selected_model,
+                    "messages": messages,
+                    "think": think,
+                    "options": chat_options,
+                    "keep_alive": self._keep_alive,
+                }
+                if selected_tools:
+                    chat_request["tools"] = selected_tools
                 response = await asyncio.wait_for(
-                    self._client.chat(
-                        model=selected_model,
-                        messages=messages,
-                        tools=TOOL_SCHEMAS,
-                        think=think,
-                        options=chat_options,
-                        keep_alive=self._keep_alive,
-                    ),
+                    self._client.chat(**chat_request),
                     timeout=remaining,
                 )
             except TimeoutError as exc:
@@ -438,6 +482,15 @@ class OpenAICompatibleLLMGateway:
         }
         if web_context:
             payload_data["external_web_context"] = web_context
+        prefetched_file = await _prefetch_explicit_file(
+            question,
+            self._workspace,
+            self._project_root,
+            self._settings,
+            self._tool_timeout,
+        )
+        if prefetched_file:
+            payload_data["prefetched_file_context"] = prefetched_file
         encoded = json.dumps(payload_data, ensure_ascii=False)
         if len(encoded) > context_budget:
             encoded = encoded[-context_budget:]
@@ -445,6 +498,7 @@ class OpenAICompatibleLLMGateway:
             {"role": "system", "content": ANSWER_INSTRUCTIONS},
             {"role": "user", "content": encoded},
         ]
+        selected_tools = [] if prefetched_file else select_tool_schemas(question)
         deadline = asyncio.get_running_loop().time() + self._response_timeout
         for _ in range(max_tool_steps + 1):
             remaining = deadline - asyncio.get_running_loop().time()
@@ -453,12 +507,13 @@ class OpenAICompatibleLLMGateway:
             request_payload: dict[str, Any] = {
                     "model": selected_model,
                     "messages": messages,
-                    "tools": TOOL_SCHEMAS,
-                    "tool_choice": "auto",
                     "temperature": 0.2,
                     "max_tokens": int(effort["max_tokens"]),
                     "stream": False,
             }
+            if selected_tools:
+                request_payload["tools"] = selected_tools
+                request_payload["tool_choice"] = "auto"
             if self._settings.ollama_disable_thinking:
                 # llama.cpp's Qwen3 template understands this OpenAI-compatible
                 # extension and skips hidden reasoning tokens, preserving the

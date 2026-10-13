@@ -6,6 +6,8 @@ MODEL_TAG="${MODEL_TAG:-4b}"
 LLAMA_PORT="${LLAMA_PORT:-8080}"
 LLAMA_THREADS="${LLAMA_THREADS:-4}"
 LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-4096}"
+LLAMA_POLL="${LLAMA_POLL:-0}"
+START_AGENT="${START_AGENT:-1}"
 case "$MODEL_TAG" in
   4b) MODEL_FILE="Qwen3-4B-Q4_K_M.gguf" ;;
   8b) MODEL_FILE="Qwen3-8B-Q4_K_M.gguf" ;;
@@ -42,6 +44,7 @@ if [[ "$MODEL_READY" != "1" ]]; then
     --jinja \
     --ctx-size "$LLAMA_CTX_SIZE" \
     --threads "$LLAMA_THREADS" \
+    --poll "$LLAMA_POLL" \
     --parallel 1 \
     >"$PWD/logs/llama-server.log" 2>&1 &
   echo $! > "$PWD/data/llama-server.pid"
@@ -55,6 +58,11 @@ curl -fsS "http://127.0.0.1:${LLAMA_PORT}/v1/models" >/dev/null 2>&1 || {
   echo "[K3] llama-server did not become ready; inspect logs/llama-server.log" >&2
   exit 1
 }
+
+if [[ "$START_AGENT" == "0" ]]; then
+  echo "[K3] model $MODEL_TAG is ready; Agent process was not started"
+  exit 0
+fi
 
 export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
 export AGENT_WORKSPACE="${AGENT_WORKSPACE:-$PWD/workspace}"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -27,6 +28,7 @@ from self_learning_agent.domain import (
     ConversationRead,
     FinalizeResponse,
     MemoryRead,
+    ModelSwitchRequest,
     ToolRunRequest,
 )
 from self_learning_agent.errors import (
@@ -163,7 +165,15 @@ async def runtime() -> dict[str, object]:
         asyncio.to_thread(Path(settings.project_root).resolve),
     )
     return {
-        "default_model": canonical_model_id(None, settings.ollama_chat_model),
+        "default_model": (
+            next(
+                (profile["id"] for profile in list_model_profiles() if profile["id"] in registered),
+                canonical_model_id(None, settings.ollama_chat_model),
+            )
+            if canonical_model_id(None, settings.ollama_chat_model) not in registered
+            and len(registered) == 1
+            else canonical_model_id(None, settings.ollama_chat_model)
+        ),
         "default_reasoning_effort": "balanced",
         "models": [
             {**profile, "registered": profile["id"] in registered}
@@ -190,6 +200,57 @@ async def runtime() -> dict[str, object]:
             "yolo_model_path": settings.yolo_model_path,
         },
     }
+
+
+@app.post("/v1/runtime/model")
+async def switch_runtime_model(payload: ModelSwitchRequest) -> dict[str, object]:
+    """Switch the single model process used by the K3 llama-server runtime."""
+    settings = get_settings()
+    if settings.llm_backend != "openai_compatible":
+        raise HTTPException(
+            status_code=501,
+            detail="当前后端不支持运行时切换模型，请在 Ollama 中先导入目标模型。",
+        )
+    project_root = Path(settings.project_root).resolve()
+    model_files = {
+        "qwen3-local:4b": "Qwen3-4B-Q4_K_M.gguf",
+        "qwen3-local:8b": "Qwen3-8B-Q4_K_M.gguf",
+        "qwen3-local:14b": "Qwen3-14B-Q4_K_M.gguf",
+    }
+    model_file = project_root / model_files[payload.model]
+    if not model_file.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"K3 上尚未部署 {payload.model} 对应的 GGUF 文件：{model_file.name}",
+        )
+    script = project_root / "k3_start.sh"
+    if os.name != "posix" or not script.is_file():
+        raise HTTPException(
+            status_code=501,
+            detail="当前运行环境没有 K3 模型切换脚本。",
+        )
+    tag = payload.model.rsplit(":", 1)[-1]
+    env = os.environ.copy()
+    env["MODEL_TAG"] = tag
+    env["START_AGENT"] = "0"
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "/bin/bash",
+            str(script),
+            cwd=str(project_root),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=300)
+    except asyncio.TimeoutError as exc:
+        process.kill()
+        await process.wait()
+        raise HTTPException(status_code=504, detail="模型切换超时，请检查 K3 负载和 llama-server 日志。") from exc
+    if process.returncode != 0:
+        detail = (output or b"").decode("utf-8", errors="replace")[-1200:]
+        raise HTTPException(status_code=503, detail=f"模型切换失败：{detail}")
+    return await runtime()
 
 
 async def _embedding_available(settings: Settings, registered: set[str]) -> bool:

@@ -6,11 +6,24 @@ import json
 import logging
 import operator
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_EXPLICIT_PATH_RE = re.compile(
+    r"(?<![\w:])(\/(?:[^\s，。；！？,!?]+)|[A-Za-z]:\\[^\s，。；！？,!?]+)"
+)
+
+
+def extract_explicit_path(question: str) -> str | None:
+    """Extract a likely absolute local path from a direct file request."""
+    match = _EXPLICIT_PATH_RE.search(question)
+    if not match:
+        return None
+    return match.group(1).rstrip(".)]}>。，；！？")
 
 
 TOOL_SCHEMAS = [
@@ -112,6 +125,32 @@ TOOL_SCHEMAS = [
         },
     },
 ]
+
+
+def select_tool_schemas(question: str) -> list[dict[str, Any]]:
+    """Keep the model prompt small by exposing only relevant tools.
+
+    The K3 CPU spends most of its time pre-filling the prompt. Sending every
+    hardware, camera, calculator and filesystem schema for a greeting made
+    even trivial requests pay the full tool-context cost. The selection is a
+    conservative keyword gate; file and hardware requests retain their real
+    tools, while ordinary conversation receives no tool schema.
+    """
+    text = question.casefold()
+    names: set[str] = set()
+    file_markers = (
+        "文件", "文件夹", "目录", "读取", "读一下", "查看", "内容", "路径",
+        "workspace", "/", "\\", ".md", ".txt", ".json", ".py", ".yaml",
+    )
+    if any(marker in text for marker in file_markers):
+        names.update({"workspace_list", "workspace_read"})
+    if any(marker in text for marker in ("时间", "几点", "日期", "today", "date", "time")):
+        names.add("get_time")
+    if any(marker in text for marker in ("计算", "算一下", "等于", "calculate")):
+        names.add("calculator")
+    if any(marker in text for marker in ("机械臂", "摄像头", "相机", "执行器", "硬件", "yolo")):
+        names.update({"hardware_status", "camera_capture", "hardware_command"})
+    return [schema for schema in TOOL_SCHEMAS if schema["function"]["name"] in names]
 
 
 def _safe_path(

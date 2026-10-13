@@ -25,6 +25,7 @@ from self_learning_agent.memory import MemoryStore
 from self_learning_agent.model_profiles import canonical_model_id
 from self_learning_agent.models import Conversation, Message
 from self_learning_agent.repositories import ConversationRepository
+from self_learning_agent.tools import execute_tool, extract_explicit_path
 from self_learning_agent.web_search import search_web
 
 
@@ -185,6 +186,30 @@ def _attach_web_evidence(answer: str, web_context: str) -> str:
     return answer
 
 
+async def _direct_file_read_answer(content: str, settings: Settings) -> str | None:
+    """Serve an explicit raw file-read request without a second model round trip.
+
+    On the RISC-V K3, asking a model to emit a tool call and then placing a
+    multi-thousand-token file result back into the prompt can take minutes.
+    A direct read remains inside the same filesystem policy and is used only
+    when the user explicitly asks to read/view a path without asking for
+    analysis or summarization.
+    """
+    path = extract_explicit_path(content)
+    if not path or not any(marker in content for marker in ("读取", "读一下", "查看文件", "打开文件")):
+        return None
+    if any(marker in content for marker in ("分析", "总结", "解释", "找出问题", "为什么")):
+        return None
+    result = await execute_tool(
+        "workspace_read",
+        {"path": path},
+        settings.agent_workspace,
+        project_root=settings.project_root,
+        settings=settings,
+    )
+    return f"文件读取结果（{path}）：\n{result}"
+
+
 class AgentService:
     def __init__(
         self,
@@ -230,7 +255,14 @@ class AgentService:
             else ""
         )
         selected_model = canonical_model_id(model, self.settings.ollama_chat_model)
-        if use_web:
+        direct_file_answer = (
+            await _direct_file_read_answer(content, self.settings)
+            if not use_web
+            else None
+        )
+        if direct_file_answer is not None:
+            answer = direct_file_answer
+        elif use_web:
             answer = await self.llm.answer(
                 content,
                 to_transcript(recent_records),

@@ -150,9 +150,15 @@ function renderRuntime(runtime) {
     const modelInfo = state.runtimeModels.find((item) => item.id === model);
     const ready = modelInfo ? modelInfo.registered : false;
     button.classList.toggle("unavailable", !ready);
-    button.title = ready ? "模型已注册到本地 Ollama" : "模型不可调用，请运行模型导入.bat";
+    button.title = ready
+      ? "模型当前已加载"
+      : modelInfo?.file_available
+        ? "模型文件已部署，点击后切换 K3 模型服务"
+        : "模型文件尚未部署到当前运行环境";
     const status = button.querySelector("[data-model-status]");
-    if (status) status.textContent = ready ? "已就绪" : !runtime.ollama_online ? "服务离线" : modelInfo?.file_available ? "待导入" : "占位未部署";
+    if (status) status.textContent = ready
+      ? "当前加载"
+      : modelInfo?.file_available ? "已部署，点击切换" : "未部署";
   });
   if (!available.has(state.model) && available.has(runtime.default_model)) state.model = runtime.default_model;
   updateModelSelection();
@@ -171,10 +177,37 @@ function updateModelSelection() {
   elements.modelNote.textContent = `当前使用 ${meta.label}，${meta.note}`;
 }
 
-function setModel(model) {
+async function setModel(model) {
   if (!MODEL_META[model]) return;
   const profile = state.runtimeModels.find((item) => item.id === model);
-  if (profile && !profile.registered) { showToast("模型尚未就绪，请运行模型导入.bat。", "error"); return; }
+  if (profile && !profile.registered) {
+    if (!profile.file_available) {
+      showToast("该模型文件尚未部署到当前运行环境。", "error");
+      return;
+    }
+    if (!window.confirm(`切换到 ${MODEL_META[model].label} 会重启 K3 模型服务，切换期间当前请求会暂停，是否继续？`)) return;
+    elements.modelOptions.querySelectorAll("[data-model]").forEach((button) => { button.disabled = true; });
+    showToast(`正在切换到 ${MODEL_META[model].label}，大模型可能需要较长加载时间…`);
+    try {
+      const runtime = await apiRequest("/v1/runtime/model", {
+        method: "POST",
+        body: JSON.stringify({ model }),
+      });
+      renderRuntime(runtime);
+      if (!runtime.models?.some((item) => item.id === model && item.registered)) {
+        throw new Error("模型服务已返回，但目标模型尚未就绪");
+      }
+      state.model = model;
+      updateModelSelection();
+      showToast(`已切换到 ${MODEL_META[model].label}。`);
+    } catch (error) {
+      showToast(`模型切换失败：${error.message}`, "error");
+      await loadRuntime();
+    } finally {
+      elements.modelOptions.querySelectorAll("[data-model]").forEach((button) => { button.disabled = false; });
+    }
+    return;
+  }
   state.model = model;
   updateModelSelection();
   showToast(`已切换到 ${MODEL_META[model].label}。`);
