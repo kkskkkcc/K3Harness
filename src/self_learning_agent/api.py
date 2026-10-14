@@ -222,7 +222,13 @@ async def switch_runtime_model(payload: ModelSwitchRequest) -> dict[str, object]
         )
     await _model_switch_lock.acquire()
     try:
-        return await _switch_runtime_model_impl(payload)
+        result = await _switch_runtime_model_impl(payload)
+        # The helper probes runtime while the lock is still held.  Clear the
+        # transient flag in the response so the browser can immediately
+        # render the target model as ready instead of showing a stale loading
+        # toast after a successful switch.
+        result["model_switching"] = False
+        return result
     finally:
         _model_switch_lock.release()
 
