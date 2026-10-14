@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -8,11 +9,40 @@ from self_learning_agent.domain import (
     MessageRole,
     TranscriptMessage,
 )
+from self_learning_agent.config import Settings
 from self_learning_agent.services import (
     _attach_web_evidence,
+    _direct_file_read_answer,
     is_durable_user_statement,
     validate_summary_sources,
 )
+
+
+def test_direct_file_read_handles_directory_and_missing_path(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    file_path = workspace / "README.md"
+    file_path.write_text("hello", encoding="utf-8")
+    settings = Settings(
+        _env_file=None,
+        agent_workspace=str(workspace),
+        project_root=str(workspace),
+        file_access_mode="local",
+    )
+
+    file_answer = asyncio.run(_direct_file_read_answer(f"请读取 {file_path}", settings))
+    assert file_answer is not None
+    assert "hello" in file_answer
+
+    directory_answer = asyncio.run(_direct_file_read_answer(f"请读取 {workspace}", settings))
+    assert directory_answer is not None
+    assert "README.md" in directory_answer
+
+    missing_answer = asyncio.run(
+        _direct_file_read_answer(f"请读取 {workspace / 'missing.txt'}", settings)
+    )
+    assert missing_answer is not None
+    assert "文件读取失败" in missing_answer
 
 
 def transcript_message() -> TranscriptMessage:

@@ -200,14 +200,31 @@ async def _direct_file_read_answer(content: str, settings: Settings) -> str | No
         return None
     if any(marker in content for marker in ("分析", "总结", "解释", "找出问题", "为什么")):
         return None
-    result = await execute_tool(
-        "workspace_read",
-        {"path": path},
-        settings.agent_workspace,
-        project_root=settings.project_root,
-        settings=settings,
-    )
-    return f"文件读取结果（{path}）：\n{result}"
+    try:
+        result = await execute_tool(
+            "workspace_read",
+            {"path": path},
+            settings.agent_workspace,
+            project_root=settings.project_root,
+            settings=settings,
+        )
+        return f"文件读取结果（{path}）：\n{result}"
+    except Exception as exc:
+        # A path can name a directory, and a stale/mistyped path is common in
+        # field testing.  Direct-read is an optimization path and must never
+        # turn a user mistake into an uncaught 500.  Try a directory listing,
+        # then surface the real tool error as a normal assistant message.
+        try:
+            listing = await execute_tool(
+                "workspace_list",
+                {"subpath": path},
+                settings.agent_workspace,
+                project_root=settings.project_root,
+                settings=settings,
+            )
+            return f"目标是目录，目录内容如下（{path}）：\n{listing}"
+        except Exception:
+            return f"文件读取失败（{path}）：{exc}"
 
 
 class AgentService:
