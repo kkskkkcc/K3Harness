@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     audio_api_key: str = ""
     audio_asr_model: str = "sensevoice"
     audio_tts_model: str = "matcha_zh_en"
+    audio_tts_voice_id: str = "zf_xiaobei"
     audio_work_dir: str = "./workspace/audio"
     audio_max_upload_bytes: int = 20 * 1024 * 1024
     audio_input_device: str = ""

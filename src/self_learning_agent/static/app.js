@@ -14,6 +14,8 @@ const state = {
   conversationId: null,
   finalized: false,
   sending: false,
+  recording: false,
+  transcribing: false,
   modelSwitching: false,
   webEnabled: false,
   model: "qwen3-local:8b",
@@ -182,6 +184,10 @@ function updateModelSelection() {
 }
 
 async function setModel(model) {
+  if (state.sending || state.recording || state.transcribing) {
+    showToast("请先完成当前消息或录音，再切换模型。");
+    return;
+  }
   if (!MODEL_META[model]) return;
   const profile = state.runtimeModels.find((item) => item.id === model);
   if (profile && !profile.registered) {
@@ -401,15 +407,16 @@ function maybePromptToFinalize(answer) {
 
 function setSending(isSending) {
   state.sending = isSending;
-  const blocked = isSending || state.modelSwitching;
+  const blocked = isSending || state.modelSwitching || state.recording || state.transcribing;
   elements.messageInput.disabled = blocked || state.finalized;
   elements.sendButton.disabled = blocked || state.finalized;
   elements.finalize.disabled = blocked || state.finalized || !state.conversationId;
+  document.dispatchEvent(new Event("agent-controls-change"));
 }
 
 async function sendMessage(content) {
   const cleanContent = content.trim();
-  if (!cleanContent || state.sending || state.finalized) return;
+  if (!cleanContent || state.sending || state.finalized || state.recording || state.transcribing || state.modelSwitching) return;
   setSending(true); createMessage("user", cleanContent); elements.messageInput.value = ""; updateContextMeter(); resizeComposer();
   // Attach a one-line list of pending uploads so the agent knows there are
   // files it can ``workspace_read`` this turn. The chips remain visible
@@ -431,6 +438,7 @@ async function sendMessage(content) {
     typingMessage.remove();
     if (response.web_status) appendSystemMessage(response.web_status);
     createMessage("assistant", response.content, response.recalled_memories || []);
+    document.dispatchEvent(new CustomEvent("agent-reply", { detail: response.content }));
     maybePromptToFinalize(response.content);
   } catch (error) { typingMessage?.remove(); appendSystemMessage(`消息发送失败：${error.message}`); showToast(error.message, "error"); }
   finally { setSending(false); if (!state.finalized) elements.messageInput.focus(); }

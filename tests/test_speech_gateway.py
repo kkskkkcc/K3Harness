@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 
 from self_learning_agent.config import Settings
@@ -22,11 +24,13 @@ def _gateway(handler) -> SpacemiTAIGateway:
 
 async def test_spacemit_gateway_transcribes_and_synthesizes(tmp_path) -> None:
     seen: list[str] = []
+    seen_tts_payload: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
         if request.url.path.endswith("/asr/recognize"):
             return httpx.Response(200, json={"text": "找穿红衣服的人"})
+        seen_tts_payload.update(json.loads(request.content))
         return httpx.Response(
             200,
             content=b"RIFF-test-audio",
@@ -43,6 +47,7 @@ async def test_spacemit_gateway_transcribes_and_synthesizes(tmp_path) -> None:
 
     assert output.read_bytes() == b"RIFF-test-audio"
     assert seen == ["/v1/asr/recognize", "/v1/tts/synthesize"]
+    assert seen_tts_payload["voice_id"] == "zf_xiaobei"
 
 
 async def test_gateway_extracts_nested_asr_response(tmp_path) -> None:

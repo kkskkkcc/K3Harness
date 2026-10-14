@@ -28,7 +28,9 @@ class AudioGateway(Protocol):
 
     async def transcribe(self, audio_path: Path) -> str: ...
 
-    async def synthesize(self, text: str, output_path: Path) -> Path: ...
+    async def synthesize(
+        self, text: str, output_path: Path, voice_id: str | None = None
+    ) -> Path: ...
 
 
 class DisabledAudioGateway:
@@ -47,7 +49,7 @@ class DisabledAudioGateway:
     async def transcribe(self, audio_path: Path) -> str:  # noqa: ARG002
         raise AudioGatewayError("语音输入未启用，请先在 K3 安装并启用 SpacemiT AI Gateway。")
 
-    async def synthesize(self, text: str, output_path: Path) -> Path:  # noqa: ARG002
+    async def synthesize(self, text: str, output_path: Path, voice_id: str | None = None) -> Path:  # noqa: ARG002
         raise AudioGatewayError("语音输出未启用，请先在 K3 安装并启用 SpacemiT AI Gateway。")
 
 
@@ -64,6 +66,7 @@ class SpacemiTAIGateway:
         )
         self._asr_model = settings.audio_asr_model
         self._tts_model = settings.audio_tts_model
+        self._tts_voice_id = settings.audio_tts_voice_id
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -105,11 +108,15 @@ class SpacemiTAIGateway:
             raise AudioGatewayError("ASR 返回了空文本，请检查麦克风、音频格式或说话时长。")
         return text
 
-    async def synthesize(self, text: str, output_path: Path) -> Path:
+    async def synthesize(self, text: str, output_path: Path, voice_id: str | None = None) -> Path:
         try:
             response = await self._client.post(
                 "/v1/tts/synthesize",
-                json={"text": text, "model": self._tts_model},
+                json={
+                    "text": text,
+                    "model": self._tts_model,
+                    "voice_id": voice_id or self._tts_voice_id,
+                },
             )
             response.raise_for_status()
             output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -385,7 +385,7 @@ async def audio_synthesize(payload: AudioSynthesizeRequest):
     output = root / "outgoing" / f"reply-{_uuid4().hex}.wav"
     gateway = build_audio_gateway(settings)
     try:
-        await gateway.synthesize(payload.text, output)
+        await gateway.synthesize(payload.text, output, payload.voice_id)
         return FileResponse(output, media_type="audio/wav", filename=output.name)
     except AudioGatewayError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

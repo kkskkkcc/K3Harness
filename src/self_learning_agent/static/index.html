@@ -90,6 +90,16 @@
             </section>
 
             <div class="composer-zone">
+              <div class="voice-controls" aria-label="本机语音测试">
+                <select id="voice-input-device" aria-label="选择本机麦克风"><option value="">系统默认麦克风</option></select>
+                <button type="button" id="voice-devices">选择麦克风</button>
+                <button type="button" id="voice-record" disabled>开始录音</button>
+                <label><input type="checkbox" id="voice-autosend" checked /> 识别后自动发送</label>
+                <label><input type="checkbox" id="voice-playback" /> 语音回复</label>
+                <button type="button" id="voice-speaker-test">测试扬声器</button>
+              </div>
+              <p id="voice-status" class="voice-status" role="status">正在检查 K3 语音服务…</p>
+              <audio id="voice-player" controls hidden aria-label="K3 合成的语音回复"></audio>
               <div class="uploads-strip" id="uploads-strip" aria-live="polite"></div>
               <form class="composer" id="chat-form">
                 <label class="sr-only" for="message-input">发送消息给 Agent</label>
@@ -156,5 +166,7 @@
     </div>
     <div class="sidebar-scrim" id="sidebar-scrim" aria-hidden="true"></div>
     <div class="toast-region" id="toast-region" aria-live="assertive"></div>
+    <script src="/static/voice-codec.js" defer></script>
+    <script src="/static/voice.js" defer></script>
   </body>
 </html>

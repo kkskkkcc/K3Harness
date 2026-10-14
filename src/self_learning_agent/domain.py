@@ -119,6 +119,7 @@ class ModelSwitchRequest(BaseModel):
 
 class AudioSynthesizeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
+    voice_id: str | None = Field(default=None, max_length=64)
 
 
 class ToolRunRequest(BaseModel):
