@@ -69,6 +69,12 @@ app = FastAPI(
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# K3 has one llama-server endpoint and one shared A100/TCM pool.  Model
+# switches must be serialized; otherwise two browser windows can start two
+# GGUF loaders at once and leave the endpoint returning 503 while both
+# processes compete for memory and TCM.
+_model_switch_lock = asyncio.Lock()
+
 # Wrap StaticFiles so every response includes ``Cache-Control: no-store``.
 # Without this the browser caches the old HTML/JS and the operator keeps
 # seeing a stale UI even after we deploy a fix (e.g. the shutdown button).
@@ -184,6 +190,7 @@ async def runtime() -> dict[str, object]:
             for profile in list_model_profiles()
         ],
         "ollama_online": ollama_online,
+        "model_switching": _model_switch_lock.locked(),
         "latency_target_seconds": settings.latency_target_seconds,
         "filesystem": {
             "mode": settings.file_access_mode,
@@ -208,6 +215,19 @@ async def runtime() -> dict[str, object]:
 
 @app.post("/v1/runtime/model")
 async def switch_runtime_model(payload: ModelSwitchRequest) -> dict[str, object]:
+    if _model_switch_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="模型正在切换，请等待当前切换完成后再试。",
+        )
+    await _model_switch_lock.acquire()
+    try:
+        return await _switch_runtime_model_impl(payload)
+    finally:
+        _model_switch_lock.release()
+
+
+async def _switch_runtime_model_impl(payload: ModelSwitchRequest) -> dict[str, object]:
     """Switch the single model process used by the K3 llama-server runtime."""
     settings = get_settings()
     if settings.llm_backend != "openai_compatible":
@@ -427,6 +447,11 @@ async def send_message(
     payload: ChatRequest,
     service: AgentService = Depends(get_agent_service),
 ):
+    if _model_switch_lock.locked():
+        raise HTTPException(
+            status_code=409,
+            detail="模型正在切换或加载，请等待右侧模型状态变为‘当前加载’后再发送。",
+        )
     try:
         return await service.chat(
             conversation_id,
@@ -442,10 +467,20 @@ async def send_message(
     except ResponseError as exc:
         raise model_http_error(exc) from exc
     except (ConnectionError, httpx.RequestError) as exc:
+        if _model_switch_lock.locked():
+            raise HTTPException(
+                status_code=409,
+                detail="模型正在切换或加载，请等待右侧模型状态变为‘当前加载’后再发送。",
+            ) from exc
         raise HTTPException(
             status_code=503, detail="无法连接本地模型服务，请检查 llama-server/Ollama 是否已启动。"
         ) from exc
     except RuntimeError as exc:
+        if _model_switch_lock.locked() or "Loading model" in str(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="模型正在切换或加载，请等待右侧模型状态变为‘当前加载’后再发送。",
+            ) from exc
         raise HTTPException(status_code=503, detail=str(exc)[:500]) from exc
     except TimeoutError as exc:
         raise HTTPException(

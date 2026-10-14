@@ -30,6 +30,33 @@ fi
 [[ -f "$MODEL_PATH" ]] || { echo "missing model: $MODEL_PATH" >&2; exit 1; }
 
 mkdir -p data logs workspace
+
+stop_existing_llama() {
+  local pids
+  pids="$(pgrep -x llama-server || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+  echo "[K3] stopping existing llama-server processes: $pids"
+  kill $pids 2>/dev/null || true
+  # Loading a large GGUF can take longer than a normal SIGTERM grace period.
+  # Never start a second model until every old process has exited; two
+  # instances compete for the eight A100/TCM blocks and cause HTTP 503s.
+  for _ in $(seq 1 30); do
+    pgrep -x llama-server >/dev/null 2>&1 || break
+    sleep 1
+  done
+  pids="$(pgrep -x llama-server || true)"
+  if [[ -n "$pids" ]]; then
+    echo "[K3] forcing stale llama-server processes to exit: $pids" >&2
+    kill -KILL $pids 2>/dev/null || true
+    sleep 1
+  fi
+  if command -v spacemit-tcm-smi >/dev/null 2>&1; then
+    spacemit-tcm-smi -c >/dev/null 2>&1 || true
+  fi
+}
+
 MODEL_READY=0
 if curl -fsS "http://127.0.0.1:${LLAMA_PORT}/v1/models" 2>/dev/null | grep -q "qwen3-local:${MODEL_TAG}"; then
   MODEL_READY=1
@@ -37,10 +64,7 @@ else
   # A running server with another alias must be replaced when the operator
   # switches 4b/8b/14b; otherwise the API would advertise a model that is not
   # actually loaded.
-  # Match only the server executable; ``pkill -f`` can also match the shell
-  # command that is invoking this script during an SSH model switch.
-  pkill -x llama-server 2>/dev/null || true
-  sleep 2
+  stop_existing_llama
 fi
 if [[ "$MODEL_READY" != "1" ]]; then
   echo "[K3] starting llama-server with $MODEL_FILE"

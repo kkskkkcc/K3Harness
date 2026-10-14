@@ -14,6 +14,7 @@ const state = {
   conversationId: null,
   finalized: false,
   sending: false,
+  modelSwitching: false,
   webEnabled: false,
   model: "qwen3-local:8b",
   reasoningEffort: "balanced",
@@ -137,6 +138,9 @@ function renderRuntime(runtime) {
     elements.latencyBadge.textContent = `目标 <${runtime.latency_target_seconds}s`;
   }
   state.runtimeModels = runtime.models || [];
+  if (runtime.model_switching && !state.modelSwitching) {
+    showToast("K3 正在加载模型，请等待右侧状态恢复后再发送消息。");
+  }
   if (elements.memoryMode) {
     const mode = runtime.memory?.embedding_mode || (runtime.memory?.embedding_available ? "semantic" : "lexical");
     elements.memoryMode.textContent = mode === "semantic" ? "语义记忆" : "词法记忆";
@@ -186,6 +190,8 @@ async function setModel(model) {
       return;
     }
     if (!window.confirm(`切换到 ${MODEL_META[model].label} 会重启 K3 模型服务，切换期间当前请求会暂停，是否继续？`)) return;
+    state.modelSwitching = true;
+    setSending(false);
     elements.modelOptions.querySelectorAll("[data-model]").forEach((button) => { button.disabled = true; });
     showToast(`正在切换到 ${MODEL_META[model].label}，大模型可能需要较长加载时间…`);
     try {
@@ -204,6 +210,8 @@ async function setModel(model) {
       showToast(`模型切换失败：${error.message}`, "error");
       await loadRuntime();
     } finally {
+      state.modelSwitching = false;
+      setSending(false);
       elements.modelOptions.querySelectorAll("[data-model]").forEach((button) => { button.disabled = false; });
     }
     return;
@@ -393,9 +401,10 @@ function maybePromptToFinalize(answer) {
 
 function setSending(isSending) {
   state.sending = isSending;
-  elements.messageInput.disabled = isSending || state.finalized;
-  elements.sendButton.disabled = isSending || state.finalized;
-  elements.finalize.disabled = isSending || state.finalized || !state.conversationId;
+  const blocked = isSending || state.modelSwitching;
+  elements.messageInput.disabled = blocked || state.finalized;
+  elements.sendButton.disabled = blocked || state.finalized;
+  elements.finalize.disabled = blocked || state.finalized || !state.conversationId;
 }
 
 async function sendMessage(content) {
