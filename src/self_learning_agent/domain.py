@@ -117,6 +117,10 @@ class ModelSwitchRequest(BaseModel):
     model: Literal["qwen3-local:4b", "qwen3-local:8b", "qwen3-local:14b"]
 
 
+class AudioSynthesizeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=20_000)
+
+
 class ToolRunRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     arguments: dict = Field(default_factory=dict)

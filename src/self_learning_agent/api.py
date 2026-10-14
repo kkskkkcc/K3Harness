@@ -9,7 +9,17 @@ from uuid import UUID
 from uuid import uuid4 as _uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from ollama import ResponseError
@@ -19,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from self_learning_agent.config import Settings, get_settings
 from self_learning_agent.db import get_session, init_db
 from self_learning_agent.domain import (
+    AudioSynthesizeRequest,
     ChatRequest,
     ChatResponse,
     ConversationCreate,
@@ -47,6 +58,7 @@ from self_learning_agent.model_profiles import (
 )
 from self_learning_agent.repositories import ConversationRepository
 from self_learning_agent.services import AgentService
+from self_learning_agent.speech_gateway import AudioGatewayError, build_audio_gateway
 from self_learning_agent.tools import TOOL_SCHEMAS, execute_tool
 from self_learning_agent.workflows import WORKFLOW_DEFINITIONS, run_workflow
 
@@ -276,10 +288,13 @@ async def _switch_runtime_model_impl(payload: ModelSwitchRequest) -> dict[str, o
             stderr=asyncio.subprocess.STDOUT,
         )
         output, _ = await asyncio.wait_for(process.communicate(), timeout=300)
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         process.kill()
         await process.wait()
-        raise HTTPException(status_code=504, detail="模型切换超时，请检查 K3 负载和 llama-server 日志。") from exc
+        raise HTTPException(
+            status_code=504,
+            detail="模型切换超时，请检查 K3 负载和 llama-server 日志。",
+        ) from exc
     if process.returncode != 0:
         detail = (output or b"").decode("utf-8", errors="replace")[-1200:]
         raise HTTPException(status_code=503, detail=f"模型切换失败：{detail}")
@@ -310,6 +325,120 @@ async def _embedding_available(settings: Settings, registered: set[str]) -> bool
             return response.status_code == 200
     except (httpx.HTTPError, ValueError, KeyError):
         return False
+
+
+def _audio_root(settings: Settings) -> Path:
+    root = Path(settings.audio_work_dir).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+async def _store_audio_upload(upload: UploadFile, destination: Path, max_bytes: int) -> None:
+    written = 0
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("wb") as target:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > max_bytes:
+                destination.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="音频文件超过配置的大小限制")
+            target.write(chunk)
+
+
+@app.get("/v1/audio/status")
+async def audio_status() -> dict[str, object]:
+    settings = get_settings()
+    gateway = build_audio_gateway(settings)
+    try:
+        result = await gateway.status()
+        result["work_dir"] = str(_audio_root(settings))
+        result["input_device"] = settings.audio_input_device
+        result["output_device"] = settings.audio_output_device
+        return result
+    finally:
+        await gateway.aclose()
+
+
+@app.post("/v1/audio/transcribe")
+async def audio_transcribe(file: UploadFile = File(...)) -> dict[str, str]:
+    settings = get_settings()
+    root = _audio_root(settings)
+    source = root / "incoming" / f"{_uuid4().hex}-{Path(file.filename or 'input.wav').name}"
+    await _store_audio_upload(file, source, settings.audio_max_upload_bytes)
+    gateway = build_audio_gateway(settings)
+    try:
+        text_value = await gateway.transcribe(source)
+        return {"text": text_value, "path": str(source.relative_to(root))}
+    except AudioGatewayError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        await gateway.aclose()
+
+
+@app.post("/v1/audio/synthesize")
+async def audio_synthesize(payload: AudioSynthesizeRequest):
+    settings = get_settings()
+    root = _audio_root(settings)
+    output = root / "outgoing" / f"reply-{_uuid4().hex}.wav"
+    gateway = build_audio_gateway(settings)
+    try:
+        await gateway.synthesize(payload.text, output)
+        return FileResponse(output, media_type="audio/wav", filename=output.name)
+    except AudioGatewayError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        await gateway.aclose()
+
+
+@app.post("/v1/voice/turn")
+async def voice_turn(
+    file: UploadFile = File(...),
+    user_id: str = Form("demo-user"),
+    conversation_id: str | None = Form(None),
+    model: str | None = Form(None),
+    reasoning_effort: str = Form("fast"),
+    service: AgentService = Depends(get_agent_service),
+) -> dict[str, object]:
+    """Transcribe one microphone clip, run one Agent turn, and synthesize it."""
+    settings = get_settings()
+    root = _audio_root(settings)
+    source = root / "incoming" / f"{_uuid4().hex}-{Path(file.filename or 'input.wav').name}"
+    await _store_audio_upload(file, source, settings.audio_max_upload_bytes)
+    gateway = build_audio_gateway(settings)
+    try:
+        transcript = await gateway.transcribe(source)
+        if conversation_id:
+            try:
+                turn_id = UUID(conversation_id)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail="conversation_id 不是有效 UUID"
+                ) from exc
+        else:
+            conversation = await service.start_conversation(user_id)
+            turn_id = conversation.id
+        answer = await service.chat(
+            turn_id,
+            transcript,
+            use_web=False,
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+        output = root / "outgoing" / f"reply-{_uuid4().hex}.wav"
+        await gateway.synthesize(answer.content, output)
+        return {
+            "conversation_id": str(answer.conversation_id),
+            "transcript": transcript,
+            "content": answer.content,
+            "audio_path": str(output.relative_to(root)),
+        }
+    except AudioGatewayError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        await gateway.aclose()
 
 
 @app.get("/v1/hardware/status")

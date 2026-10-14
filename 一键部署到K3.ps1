@@ -27,7 +27,7 @@ if ($LASTEXITCODE -ne 0) { throw "无法连接 K3 或 K3 缺少 /usr/bin/llama-s
 
 $Files = @(
     "src", "migrations", "requirements-k1.txt", "pyproject.toml", "README.md",
-    ".env.k3.example", "k3_setup.sh", "k3_start.sh", "k3_status.sh", "k3_stop.sh", "K3-部署说明.md",
+    ".env.k3.example", "k3_setup.sh", "k3_audio_setup.sh", "k3_start.sh", "k3_status.sh", "k3_stop.sh", "K3-部署说明.md",
     "当前进度.md", "总进度.md", "问题.md", "待解决事项.md", "架构与同步.md"
 )
 foreach ($Item in $Files) {

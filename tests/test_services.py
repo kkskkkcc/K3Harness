@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from self_learning_agent.config import Settings
 from self_learning_agent.domain import (
     ConversationSummary,
     MemoryCandidate,
@@ -9,7 +10,6 @@ from self_learning_agent.domain import (
     MessageRole,
     TranscriptMessage,
 )
-from self_learning_agent.config import Settings
 from self_learning_agent.services import (
     _attach_web_evidence,
     _direct_file_read_answer,

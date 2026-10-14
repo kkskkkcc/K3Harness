@@ -39,6 +39,21 @@ class Settings(BaseSettings):
     camera_backend: Literal["none", "opencv", "gstreamer"] = "none"
     yolo_model_path: str = "./models/yolo"
 
+    # Audio is disabled until the K3 board has a microphone/speaker and the
+    # official SpacemiT AI Gateway is installed.  The Agent talks to that
+    # gateway over HTTP so the ASR/TTS implementation can be replaced without
+    # changing conversation, memory, or workflow code.
+    audio_enabled: bool = False
+    audio_backend: Literal["disabled", "spacemit_gateway"] = "disabled"
+    audio_gateway_url: str = "http://127.0.0.1:18790"
+    audio_api_key: str = ""
+    audio_asr_model: str = "sensevoice"
+    audio_tts_model: str = "matcha_zh_en"
+    audio_work_dir: str = "./workspace/audio"
+    audio_max_upload_bytes: int = 20 * 1024 * 1024
+    audio_input_device: str = ""
+    audio_output_device: str = ""
+
     # K3 ships an optimized llama-server instead of Ollama.  The OpenAI
     # compatible backend keeps the same model/profile/tool API while allowing
     # the runtime to point at llama-server (or another compatible endpoint).
