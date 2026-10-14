@@ -31,6 +31,10 @@
       note(asrAvailable
         ? "语音已就绪。选择 K03S 麦克风，点击开始录音后请说话；识别完成默认自动发送。"
         : audio.message || "K3 语音服务尚未就绪，文字聊天仍可用。");
+      if (asrAvailable && ttsAvailable && playbackToggle.checked && !sessionStorage.getItem("k3-agent-voice-welcome")) {
+        sessionStorage.setItem("k3-agent-voice-welcome", "1");
+        speak("语音已就绪，请点击开始录音后说话。");
+      }
     } catch (error) { note(`语音服务检查失败：${error.message}`); }
     updateControls();
   }
