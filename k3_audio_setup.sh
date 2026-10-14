@@ -21,6 +21,7 @@ if ! apt-cache show spacemit-ai-gateway >/dev/null 2>&1; then
   python3 -m venv --without-pip --system-site-packages .venv-audio
   python3 -m pip --python .venv-audio/bin/python install --no-deps \
     --no-index --find-links cache/audio-wheels \
+    spacemit-ai-gateway==0.2.0 \
     spacemit-asr==1.0.4 spacemit-tts==1.0.4 \
     spacemit-audio==1.0.0 spacemit-vad==1.0.0
   .venv-audio/bin/python -c \
