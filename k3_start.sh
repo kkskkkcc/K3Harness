@@ -13,7 +13,13 @@ LLAMA_BATCH_SIZE="${LLAMA_BATCH_SIZE:-2048}"
 LLAMA_UBATCH_SIZE="${LLAMA_UBATCH_SIZE:-512}"
 LLAMA_FLASH_ATTN="${LLAMA_FLASH_ATTN:-on}"
 LLAMA_POLL="${LLAMA_POLL:-0}"
+LLAMA_STOP_GRACE_SECONDS="${LLAMA_STOP_GRACE_SECONDS:-5}"
+LLAMA_WARMUP="${LLAMA_WARMUP:-on}"
 START_AGENT="${START_AGENT:-1}"
+WARMUP_ARGS=()
+if [[ "$LLAMA_WARMUP" == "off" ]]; then
+  WARMUP_ARGS+=(--no-warmup)
+fi
 case "$MODEL_TAG" in
   4b) MODEL_FILE="Qwen3-4B-Q4_K_M.gguf" ;;
   8b) MODEL_FILE="Qwen3-8B-Q4_K_M.gguf" ;;
@@ -42,7 +48,7 @@ stop_existing_llama() {
   # Loading a large GGUF can take longer than a normal SIGTERM grace period.
   # Never start a second model until every old process has exited; two
   # instances compete for the eight A100/TCM blocks and cause HTTP 503s.
-  for _ in $(seq 1 30); do
+  for _ in $(seq 1 "$LLAMA_STOP_GRACE_SECONDS"); do
     pgrep -x llama-server >/dev/null 2>&1 || break
     sleep 1
   done
@@ -80,6 +86,7 @@ if [[ "$MODEL_READY" != "1" ]]; then
     --batch-size "$LLAMA_BATCH_SIZE" \
     --ubatch-size "$LLAMA_UBATCH_SIZE" \
     --flash-attn "$LLAMA_FLASH_ATTN" \
+    "${WARMUP_ARGS[@]}" \
     --poll "$LLAMA_POLL" \
     --parallel 1 \
     >"$PWD/logs/llama-server.log" 2>&1 &
